@@ -96,8 +96,10 @@ stateDiagram-v2
     awaiting_credentials --> awaiting_mfa: mfa screen detected by content script
     awaiting_credentials --> done: console redirect detected by service worker
     awaiting_credentials --> failed: auth error detected
+    awaiting_credentials --> failed: dom timeout
     awaiting_mfa --> done: totp accepted
     awaiting_mfa --> failed: retry limit exceeded
+    awaiting_mfa --> failed: dom timeout
     awaiting_account_id --> idle: user cancels
     awaiting_credentials --> idle: user cancels
     awaiting_mfa --> idle: user cancels
@@ -110,7 +112,7 @@ stateDiagram-v2
 
 - `awaiting_credentials` 状態は **二重監視**する。MFA 画面 DOM は Content Script の `MutationObserver` で検知し、コンソールへのリダイレクトは Service Worker が `chrome.tabs.onUpdated` で検知する（リダイレクトは HTTP 302 で CS が破棄されるため、CS からは検知不能, C-2）。MFA 未設定アカウントはリダイレクトで直接 `done` へ遷移する（3.2 Step 3, S-1）。
 - 認証エラー（パスワード誤り・アカウントロック）は同一ページに描画されるため `authErrorMarker` で検知し `aws_auth` として `failed` へ遷移する（3.5 b, M-4）。
-- いずれも観測できない場合のみ `dom_timeout`（既定 10 秒）で `failed` とする（3.5 c）。
+- いずれも観測できない場合のみ `dom_timeout`（既定 10 秒、`chrome.alarms` で計測。後述「フロー状態の復元」）で `failed` とする（3.5 c）。
 - 各待機状態からユーザーはキャンセル可能（`failed`/`idle` 復帰）。`failed` からは「再試行」で `idle` へ戻れる（5「キャンセル手段」, M-5）。
 
 ### 自動ログイン・シーケンス（オンデマンド取得, 2.2, 3.3）
@@ -148,6 +150,8 @@ sequenceDiagram
 
 各ステップで都度取得し、注入後ただちに破棄する（SW はメモリに認証情報を残さない）。全 Native Messaging 要求は `requestId` を持ち、SW 側アダプタが応答を `requestId` で対応付ける（共有ポートでの並行要求の取り違えを防ぐ, C-5）。
 
+Cookie 記憶済み（アカウント別 URL）の場合は `accountIdFieldShown` を経ず、CS が `credentialFieldShown` を直接送出して `awaiting_credentials` から開始する（ステートマシンの `routing → awaiting_credentials`、3.2 Step 1）。以降の認証情報注入は本シーケンスと同一。
+
 ### アンロックと初回同期シーケンス（4.1.1, 3.4）
 
 ```mermaid
@@ -181,10 +185,12 @@ sequenceDiagram
 
 MV3 Service Worker は遷移の合間に終了されうる。フロー状態は SW メモリではなく `chrome.storage.local` の `FlowContext`（`tabId` をキー）に保存する。
 
-- フロー開始時に `FlowContext { tabId, uuid, step, startedAt }` を書き込む。
+- フロー開始時およびステップ遷移時に `FlowContext { tabId, uuid, step, startedAt }` を書き込み、同時に dom_timeout 用アラームを登録する（下記）。
 - CS からの `signinDomEvent` は **常に `uuid` を含む**（C-1）。SW 再起動後でも、受信した `uuid`（または `tabId` から引いた `FlowContext`）で対象アカウントを特定し、`getItem`/`getTotp` を正しく発行できる。
 - `done`/`failed`/キャンセル時に当該 `FlowContext` を削除する。
 - `chrome.tabs.onUpdated` リスナーはグローバルスコープで登録し、SW 再起動時もイベントで起床して `console.aws.amazon.com` 遷移を捕捉する（C-2）。
+- フロー開始・各ステップ遷移時に `chrome.alarms.create`（`startedAt + dom_timeout`、既定 10 秒）を登録する。アラームハンドラはグローバルスコープに置き、SW が終了していても発火で起床する（`setTimeout` は SW 終了後に発火しないため必須, Issue 1）。
+- アラーム発火時、SW は `tabId` から `FlowContext` を引き `step` に応じて回復する。`awaiting_mfa` で NH の TOTP 待機（最大 30 秒）中にポート切断した場合は、MFA フォーム存続なら `getTotp` を 1 回再発行して回復を試み、上限超過・フォーム消失時は `dom_timeout` → `failed` とする（Issue 2）。`awaiting_account_id`/`awaiting_credentials` ではアラームが `dom_timeout` 遷移を駆動する。
 
 ## Requirements Traceability
 
@@ -345,6 +351,7 @@ interface SessionManager {
 
 - **switchTo の実体**: `SessionRecord.tabId` を用い `chrome.tabs.update(tabId, { active: true })` ＋ `chrome.windows.update(windowId, { focused: true })` で前面化する。`tabId` が無効（タブ閉鎖）なら新規ログインへフォールバック（C-3）。
 - **evictIfNeeded の実体**: `lastAccessedAt` 昇順で最古セッションを選び、`SessionRecord` を削除する（AWS 側セッションは保持しタブはバックグラウンドに残す）。AWS サインアウト DOM 操作は行わない（M-6）。
+- **lastAccessedAt の更新**: ログイン完了（`done`）時に `signedInAt` と同値で初期化し、`switchTo` 実行時に現在時刻へ更新する。さらにユーザーの直接タブ操作を反映するため、`chrome.tabs.onActivated` で活性化タブが追跡中セッションの `tabId` と一致したら `lastAccessedAt` を更新する（switchTo 非経由の利用が LRU 退避対象になるのを防ぐ, Issue 4）。
 - **Contract Visibility**: 既定実装は Bitwarden 用 `CredentialProvider` ＋ Native Messaging 用 `SecretSourceAdapter`。SSO 移行時は本ポートの別実装を注入する。
 
 ### Local Process
@@ -360,8 +367,9 @@ interface SessionManager {
 
 - ホスト manifest の `allowed_origins` に本拡張 ID のみを登録し、他からの到達を構造的に遮断する（2.1.1）。
 - `BW_SESSION`・マスターパスワードは自プロセスのみが保持。stdin/stdout のメッセージパッシングのみでネットワークポートを公開しない。
-- **アイドルロック実体**: 各 `HostRequest` 受信時に最終利用時刻を更新し、ホスト内タイマー（プロセス常駐）で既定 15〜30 分のアイドル経過を判定して `bw lock` を呼ぶ（CLI セッションは自動失効しないため必須, 4.1.1）。
+- **アイドルロック実体**: 各 `HostRequest` 受信時に最終利用時刻を更新し、ホスト内タイマー（プロセス常駐）で `configure` 受領済みの `idleLockMinutes`（既定 20、未受領時は内蔵既定）のアイドル経過を判定して `bw lock` を呼ぶ（CLI セッションは自動失効しないため必須, 4.1.1, Issue 5）。
 - **TOTP 待機をホスト側に封じ込め**: `getTotp` で残秒数が閾値未満なら、ホストが次ローテーションまで待機して新コードを返す。MV3 SW の `alarms`/`setTimeout` 制約を回避する（M-2）。
+- **設定の受領**: SW は `unlock` 成功直後および設定変更時に `configure` を送り、NH は `idleLockMinutes` / `totpMinRemainingSeconds` を適用する（拡張側設定の唯一の NH 伝達経路, Issue 5）。
 
 **Contracts**: Service / State
 
@@ -373,6 +381,7 @@ type HostRequest = { requestId: string } & (
   | { type: "unlock"; masterPassword: string }   // transient
   | { type: "lock" }
   | { type: "status" }
+  | { type: "configure"; idleLockMinutes: number; totpMinRemainingSeconds: number }   // 設定伝達（Issue 5）
   | { type: "listFolders" }                       // folderName 解決用（M-3）
   | { type: "listItems"; folderId: string }
   | { type: "getItem"; uuid: string }
@@ -382,6 +391,7 @@ type HostRequest = { requestId: string } & (
 type HostResponse = { requestId: string } & (
   | { type: "unlocked" }
   | { type: "locked" }
+  | { type: "configured" }
   | { type: "status"; unlocked: boolean; lastUsedAt: string }
   | { type: "folders"; folders: { id: string; name: string }[] }
   | { type: "items"; items: AccountMeta[] }
@@ -518,7 +528,7 @@ interface SelectorSet {
 - **取得経路**: Native Messaging を第一経路とし `allowed_origins` で拡張 ID 限定。`bw serve` 代替は `--disable-origin-protection` が DNS リバインディング防衛線を無効化するため、採用時はリスク受容と `localhost` 限定バインドを必須とする（2.1.2）。
 - **MFA 退化**: パスワードと TOTP シードの同一 Vault 同居により、unlock 中は多要素性が単一要素へ実効退化する。方式1＋アイドル自動ロックにより退化はアンロック窓（15〜30 分）に限定する。暫定ツール前提で受容（4.1.2）。
 - **MV3 / CSP**: リモートコード（`eval`）を排除し厳格 CSP を適用。Popup から `localhost` への直接 `fetch` を禁止し SW 経由に限定（4.1）。
-- **権限最小化**: `nativeMessaging` / `storage` / `tabs` / `scripting` / `alarms`。`cookies` は案B 決定により不要（4.1）。
+- **権限最小化**: `nativeMessaging` / `storage` / `tabs` / `scripting` / `alarms`。`alarms` は dom_timeout の計測と SW 再起動後のフロー回復に用いる（TOTP 待機はホスト側のため不使用, Issue 1/2）。`cookies` は案B 決定により不要（4.1）。
 
 ## Supporting References
 
