@@ -29,7 +29,7 @@
 - **Context**: 複数ページ遷移をまたぐログインフローの状態管理。
 - **Sources Consulted**: Chrome Service worker lifecycle（付録A）。
 - **Findings**: SW はアイドルで終了されうる。遷移合間の終了はサイレント失敗を招く。
-- **Implications**: SW はステートレス・プロキシとし、状態は Content Script ＋ URL パターンで管理。各ステップで都度取得（2.2）。
+- **Implications**: SW はステートレス・プロキシとし、フロー状態は `chrome.storage.local` の `FlowContext`（tabId キー）で永続化し SW 再起動耐性を持たせる（Oracle C-1 反映）。各ステップは都度取得。これは要件 §2.2 の「CS＋URL パターンで管理」を、再起動耐性のため非秘匿メタデータとして storage.local に置く形で精綻化したもの。
 
 ### TOTP シード形式
 
