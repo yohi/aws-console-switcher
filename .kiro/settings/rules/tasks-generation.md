@@ -128,4 +128,4 @@ Focus on capabilities and outcomes, not code structure.
 
 Use `N.M`-style numeric requirement IDs where `N` is the top-level requirement number from requirements.md (for example, Requirement 1 → 1.1, 1.2; Requirement 2 → 2.1, 2.2), and `M` is a local index within that requirement group.
 
-Document any intentionally deferred requirements with rationale.
+Every requirement ID from requirements.md MUST map to at least one task—never postpone a requirement itself. Limit deferral to optional verification or follow-up **test** subtasks (see *Optional Test Coverage Tasks*): mark them `- [ ]*` and document the rationale in their detail bullets.
