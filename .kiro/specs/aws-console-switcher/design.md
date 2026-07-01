@@ -185,12 +185,13 @@ sequenceDiagram
 
 MV3 Service Worker は遷移の合間に終了されうる。フロー状態は SW メモリではなく `chrome.storage.local` の `FlowContext`（`tabId` をキー）に保存する。
 
-- フロー開始時およびステップ遷移時に `FlowContext { tabId, uuid, step, startedAt }` を書き込み、同時に dom_timeout 用アラームを登録する（下記）。
+- フロー開始時およびステップ遷移時に `FlowContext { tabId, uuid, step, startedAt, mfaRetryCount }` を書き込み（フロー開始時は `mfaRetryCount: 0` で初期化）、同時に dom_timeout 用アラームを登録する（下記）。
 - CS からの `signinDomEvent` は **常に `uuid` を含む**（C-1）。SW 再起動後でも、受信した `uuid`（または `tabId` から引いた `FlowContext`）で対象アカウントを特定し、`getItem`/`getTotp` を正しく発行できる。
-- `done`/`failed`/キャンセル時に当該 `FlowContext` を削除する。
+- クリーンアップは単一経路に集約する: `done`/`failed`/キャンセル、およびフロー進行中タブのクローズ時に、当該 `FlowContext` を `chrome.storage.local` から削除し、同名アラーム `flowTimeout:{tabId}` も必ず解除する（後続フローに stale state を残さない）。
 - `chrome.tabs.onUpdated` リスナーはグローバルスコープで登録し、SW 再起動時もイベントで起床して `console.aws.amazon.com` 遷移を捕捉する（C-2）。
+- `chrome.tabs.onRemoved` リスナーもグローバルスコープで登録し、フロー進行中タブの閉鎖を検知したら上記クリーンアップ経路を即時実行する。アラーム発火（`awaiting_mfa` は最大 35 秒）を待たずに `FlowContext` と `flowTimeout:{tabId}` を解消し、閉鎖済みタブへの無駄な `getTotp` 再発行を防ぐ（C-2 と対をなすグローバル tabs 監視）。
 - フロー開始・各ステップ遷移時に、フロー固有名 `flowTimeout:{tabId}` で `chrome.alarms.create` を登録する（同一 `tabId` の旧アラームは上書きで単一化され、並行フロー間で衝突しない）。`dom_timeout` の監視窓は状態依存とし、`awaiting_account_id`/`awaiting_credentials` は既定 10 秒、`awaiting_mfa` はホストの TOTP 待機窓（最大 30 秒）に注入・送信マージンを加えた延長窓（既定 35 秒）とする。アラームハンドラはグローバルスコープに置き、SW が終了していても発火で起床する（`setTimeout` は SW 終了後に発火しないため必須, Issue 1）。
-- アラーム発火時、SW はアラーム名から `tabId` を解析して該当 `FlowContext` を引き、`step` に応じて回復する（他タブのフローと衝突しない）。`awaiting_account_id`/`awaiting_credentials` ではアラームが `dom_timeout` 遷移を駆動する。`awaiting_mfa` では延長窓の満了までに完了しなければ、MFA フォーム存続なら `getTotp` を 1 回再発行して回復を試み、上限超過・フォーム消失時は `dom_timeout` → `failed` とする（ホスト側 TOTP 待機中のポート切断も同経路で回復, Issue 2）。
+- アラーム発火時、SW はアラーム名から `tabId` を解析して該当 `FlowContext` を引き、`step` に応じて回復する（他タブのフローと衝突しない）。`awaiting_account_id`/`awaiting_credentials` ではアラームが `dom_timeout` 遷移を駆動する。`awaiting_mfa` では延長窓の満了までに完了しなければ、MFA フォーム存続かつ `FlowContext.mfaRetryCount` が上限（既定 1）未満の場合に限り `getTotp` を再発行し、`mfaRetryCount` をインクリメントして `FlowContext` に永続化してから回復を試みる（SW 再起動をまたいで上限を保持）。上限超過・フォーム消失時は `dom_timeout` → `failed` とする（ホスト側 TOTP 待機中のポート切断も同経路で回復, Issue 2）。
 
 ## Requirements Traceability
 
@@ -454,6 +455,7 @@ interface FlowContext {            // SW 再起動耐性（C-1）。tabId をキ
   uuid: string;
   step: "routing" | "awaiting_account_id" | "awaiting_credentials" | "awaiting_mfa";
   startedAt: string;             // ISO 8601, dom_timeout 判定の起点
+  mfaRetryCount: number;         // awaiting_mfa の getTotp 再発行回数。SW 再起動をまたいで上限（既定 1）を判定（Issue 2）
 }
 
 interface ExtensionSettings {
