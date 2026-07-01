@@ -77,7 +77,7 @@ Never include:
 - Templates are starting points, customize as needed
 - Follow same granularity principles as core steering
 - All steering files loaded as project memory
-- Light references to `.kiro/specs/` and `.kiro/steering/` are acceptable; avoid other `.kiro/` directories
+- Light references to `.kiro/specs/`, `.kiro/steering/`, and `.kiro/settings/` are acceptable (path mentions only, no internal details per Avoid list above); avoid other `.kiro/` directories
 - Custom files equally important as core files
 
 ---
