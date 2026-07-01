@@ -13,7 +13,7 @@
 - Prod: hardened; monitored; least privilege
 
 ## CI/CD Flow
-```
+```text
 Code → Test → Build → Scan → Deploy (staged) → Verify
 ```
 Principles:

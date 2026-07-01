@@ -6,12 +6,12 @@
 
 ## Directory Patterns
 
-### [Pattern Name]
+### [Pattern Name 1]
 **Location**: `/path/`  
 **Purpose**: [What belongs here]  
 **Example**: [Brief example]
 
-### [Pattern Name]
+### [Pattern Name 2]
 **Location**: `/path/`  
 **Purpose**: [What belongs here]  
 **Example**: [Brief example]

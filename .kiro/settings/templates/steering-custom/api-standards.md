@@ -8,7 +8,7 @@
 - Secure by default (auth first, least privilege)
 
 ## Endpoint Pattern
-```
+```text
 /{version}/{resource}[/{id}][/{sub-resource}]
 ```
 Examples:
@@ -48,7 +48,7 @@ Choose the status that best reflects the outcome.
 
 ## Authentication
 - Credentials in standard location
-```
+```http
 Authorization: Bearer {token}
 ```
 - Reject unauthenticated before business logic
