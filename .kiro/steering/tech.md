@@ -16,7 +16,7 @@ Manifest V3 Chrome extension composed of a **stateless Service Worker proxy**, *
 
 - **D-1 Secret path:** Native Messaging first; `bw serve` only as a dev/debug fallback (DNS-rebinding risk).
 - **D-2 Sessions:** Plan B — multiple concurrent sessions (max 5); `chrome.cookies` not required.
-- **D-3 Unlock:** Method 1 (popup → host `bw unlock --passwordenv`) + host-side idle auto-lock (default 15–30 min).
+- **D-3 Unlock:** Method 1 (popup → host `bw unlock --passwordenv`) + host-side idle auto-lock (default 20 min; configurable 1–120).
 - **D-4 Scope:** Personal use = Bitwarden folder (`--folderid`).
 - **D-5 Data model:** Custom fields `aws_account_id` (required) / `aws_account_alias` (optional); default folder `AWS Accounts`; `URI` = sign-in URL.
 - **MV3 lifecycle:** Service Worker treated as ephemeral → stateless, per-step on-demand fetch (no in-SW flow state).
