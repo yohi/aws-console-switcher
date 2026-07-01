@@ -26,7 +26,7 @@ HTTP verbs:
 
 Request (typical):
 ```json
-{ "data": { ... }, "metadata": { "requestId": "..." } }
+{ "data": { ... }, "meta": { "requestId": "..." } }
 ```
 
 Success:
@@ -36,7 +36,7 @@ Success:
 
 Error:
 ```json
-{ "error": { "code": "ERROR_CODE", "message": "...", "field": "optional" } }
+{ "error": { "code": "ERROR_CODE", "message": "...", "requestId": "...", "timestamp": "..." } }
 ```
 (See error-handling for rules.)
 
