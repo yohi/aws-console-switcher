@@ -189,8 +189,8 @@ MV3 Service Worker は遷移の合間に終了されうる。フロー状態は 
 - CS からの `signinDomEvent` は **常に `uuid` を含む**（C-1）。SW 再起動後でも、受信した `uuid`（または `tabId` から引いた `FlowContext`）で対象アカウントを特定し、`getItem`/`getTotp` を正しく発行できる。
 - `done`/`failed`/キャンセル時に当該 `FlowContext` を削除する。
 - `chrome.tabs.onUpdated` リスナーはグローバルスコープで登録し、SW 再起動時もイベントで起床して `console.aws.amazon.com` 遷移を捕捉する（C-2）。
-- フロー開始・各ステップ遷移時に `chrome.alarms.create`（`startedAt + dom_timeout`、既定 10 秒）を登録する。アラームハンドラはグローバルスコープに置き、SW が終了していても発火で起床する（`setTimeout` は SW 終了後に発火しないため必須, Issue 1）。
-- アラーム発火時、SW は `tabId` から `FlowContext` を引き `step` に応じて回復する。`awaiting_mfa` で NH の TOTP 待機（最大 30 秒）中にポート切断した場合は、MFA フォーム存続なら `getTotp` を 1 回再発行して回復を試み、上限超過・フォーム消失時は `dom_timeout` → `failed` とする（Issue 2）。`awaiting_account_id`/`awaiting_credentials` ではアラームが `dom_timeout` 遷移を駆動する。
+- フロー開始・各ステップ遷移時に、フロー固有名 `flowTimeout:{tabId}` で `chrome.alarms.create` を登録する（同一 `tabId` の旧アラームは上書きで単一化され、並行フロー間で衝突しない）。`dom_timeout` の監視窓は状態依存とし、`awaiting_account_id`/`awaiting_credentials` は既定 10 秒、`awaiting_mfa` はホストの TOTP 待機窓（最大 30 秒）に注入・送信マージンを加えた延長窓（既定 35 秒）とする。アラームハンドラはグローバルスコープに置き、SW が終了していても発火で起床する（`setTimeout` は SW 終了後に発火しないため必須, Issue 1）。
+- アラーム発火時、SW はアラーム名から `tabId` を解析して該当 `FlowContext` を引き、`step` に応じて回復する（他タブのフローと衝突しない）。`awaiting_account_id`/`awaiting_credentials` ではアラームが `dom_timeout` 遷移を駆動する。`awaiting_mfa` では延長窓の満了までに完了しなければ、MFA フォーム存続なら `getTotp` を 1 回再発行して回復を試み、上限超過・フォーム消失時は `dom_timeout` → `failed` とする（ホスト側 TOTP 待機中のポート切断も同経路で回復, Issue 2）。
 
 ## Requirements Traceability
 
