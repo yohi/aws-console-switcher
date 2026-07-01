@@ -48,12 +48,12 @@ Analyze design against all review criteria, focusing on critical issues impactin
 
 ### Step 2: Identify Critical Issues (≤3)
 For each issue:
-```
+```text
 🔴 **Critical Issue [1-3]**: [Brief title]
 **Concern**: [Specific problem]
 **Impact**: [Why it matters]
 **Suggestion**: [Concrete improvement]
-**Traceability**: [Requirement ID/section from requirements.md]
+**Traceability**: [Canonical requirement ID from requirements.md, e.g., 1.1]
 **Evidence**: [Design doc section/heading]
 ```
 
@@ -66,7 +66,7 @@ Acknowledge 1-2 strong aspects to maintain balanced feedback.
 
 ## Traceability & Evidence
 
-- Link each critical issue to the relevant requirement(s) from `requirements.md` (ID or section).
+- Link each critical issue to the relevant requirement(s) from `requirements.md` using the canonical numeric ID (e.g., 1.1); do not use section-based identifiers.
 - Cite evidence locations in the design document (section/heading, diagram, or artifact) to support the assessment.
 - When applicable, reference constraints from steering context to justify the issue.
 
@@ -105,6 +105,6 @@ Engage on designer's perspective, alternatives, clarifications, and necessary ch
 ## Final Checklist
 
 - **Critical Issues ≤ 3** and each includes Impact and Recommendation
-- **Traceability**: Each issue references requirement ID/section
+- **Traceability**: Each issue references the canonical requirement ID (e.g., 1.1)
 - **Evidence**: Each issue cites design doc location
 - **Decision**: GO/NO-GO with clear rationale and next steps
