@@ -100,6 +100,7 @@ stateDiagram-v2
     awaiting_mfa --> done: totp accepted
     awaiting_mfa --> failed: retry limit exceeded
     awaiting_mfa --> failed: dom timeout
+    routing --> idle: user cancels
     awaiting_account_id --> idle: user cancels
     awaiting_credentials --> idle: user cancels
     awaiting_mfa --> idle: user cancels
@@ -113,7 +114,7 @@ stateDiagram-v2
 - `awaiting_credentials` 状態は **二重監視**する。MFA 画面 DOM は Content Script の `MutationObserver` で検知し、コンソールへのリダイレクトは Service Worker が `chrome.tabs.onUpdated` で検知する（リダイレクトは HTTP 302 で CS が破棄されるため、CS からは検知不能, C-2）。MFA 未設定アカウントはリダイレクトで直接 `done` へ遷移する（3.2 Step 3, S-1）。
 - 認証エラー（パスワード誤り・アカウントロック）は同一ページに描画されるため `authErrorMarker` で検知し `aws_auth` として `failed` へ遷移する（3.5 b, M-4）。
 - いずれも観測できない場合のみ `dom_timeout`（既定 10 秒、`chrome.alarms` で計測。後述「フロー状態の復元」）で `failed` とする（3.5 c）。
-- 各待機状態からユーザーはキャンセル可能（`failed`/`idle` 復帰）。`failed` からは「再試行」で `idle` へ戻れる（5「キャンセル手段」, M-5）。
+- `routing` を含む各状態からユーザーはキャンセル可能（`idle` 復帰）。`failed` からは「再試行」で `idle` へ戻れる（5「キャンセル手段」, M-5）。
 
 ### 自動ログイン・シーケンス（オンデマンド取得, 2.2, 3.3）
 
@@ -270,7 +271,7 @@ interface FlowError {
 
 - 揮発状態をメモリに保持しない。フロー状態は `FlowContext`（`chrome.storage.local`、`tabId` キー）で管理し、SW 再起動後も復元する（2.2, C-1）。
 - `chrome.tabs.onUpdated` リスナーをグローバルスコープで登録し、対象タブの URL が `console.aws.amazon.com/*` へ変わったら `done` 遷移を駆動する（C-2）。
-- Native Messaging は単一共有ポート。`SecretSourceAdapter` で `requestId` ベースのリクエストキューを管理し応答を demux する（C-5）。
+- Native Messaging は単一共有ポート。`SecretSourceAdapter` で `requestId` ベースのリクエストキューを管理し応答を demux する（C-5）。`requestId` は `crypto.randomUUID()` で要求ごとに生成する。ポート切断時に pending が即時 reject されるため SW 再起動を跨いだ一意性保証は不要だが、同時実行中の複数フロー（最大 5 セッション）間での衝突を実用上無視できるレベルまで低減する（C-5 の前提）。
 - Popup ↔ SW は `chrome.runtime` メッセージング。Popup から `localhost` への直接 `fetch` は CSP 上禁止のため、通信は必ず SW 経由とする（4.1）。
 
 **Dependencies**:
@@ -351,7 +352,7 @@ interface SessionManager {
 ```
 
 - **switchTo の実体**: `SessionRecord.tabId` を用い `chrome.tabs.update(tabId, { active: true })` ＋ `chrome.windows.update(windowId, { focused: true })` で前面化する。`tabId` が無効（タブ閉鎖）なら新規ログインへフォールバック（C-3）。
-- **evictIfNeeded の実体**: `lastAccessedAt` 昇順で最古セッションを選び、`SessionRecord` を削除する（AWS 側セッションは保持しタブはバックグラウンドに残す）。AWS サインアウト DOM 操作は行わない（M-6）。
+- **evictIfNeeded の実体**: `lastAccessedAt` 昇順で最古セッションを選び、`SessionRecord` を削除する（AWS 側セッションは保持しタブはバックグラウンドに残す）。AWS サインアウト DOM 操作は行わない（M-6）。呼び出しタイミング: `switchTo` 内で対象アカウントが未サインインと判定し新規ログインを確定させる直前に同期的に呼び出し、`getActiveSessions().length >= 5` の場合のみ 1 件退避してから新規セッションを追加する（同時上限 5 を一時的にも超過させない, 3.2.1）。
 - **lastAccessedAt の更新**: ログイン完了（`done`）時に `signedInAt` と同値で初期化し、`switchTo` 実行時に現在時刻へ更新する。さらにユーザーの直接タブ操作を反映するため、`chrome.tabs.onActivated` で活性化タブが追跡中セッションの `tabId` と一致したら `lastAccessedAt` を更新する（switchTo 非経由の利用が LRU 退避対象になるのを防ぐ, Issue 4）。
 - **Contract Visibility**: 既定実装は Bitwarden 用 `CredentialProvider` ＋ Native Messaging 用 `SecretSourceAdapter`。SSO 移行時は本ポートの別実装を注入する。
 
