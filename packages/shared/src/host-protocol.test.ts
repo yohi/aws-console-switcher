@@ -177,7 +177,7 @@ describe("isHostResponse", () => {
         type: "items",
         items: [
           {
-            uuid: "u",
+            uuid: "b1f9c0de-0000-4000-8000-000000000001",
             accountId: "123456789012",
             username: "alice",
             mfaEnabled: false,

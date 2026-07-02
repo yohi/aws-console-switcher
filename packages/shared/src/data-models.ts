@@ -108,8 +108,28 @@ export interface ExtensionSettings {
 }
 
 /**
+ * 正規 UUID 形式（8-4-4-4-12 の 16 進表記、大文字小文字不問）。
+ * Bitwarden アイテム ID は UUIDv4 だが、バージョン/バリアントビットは厳密検証せず全体の形のみ強制する。
+ */
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** 12 桁 AWS アカウント ID（ASCII 数字のみ）。 */
+const ACCOUNT_ID_PATTERN = /^\d{12}$/;
+
+/** `uuid` が正規 UUID 形式の文字列か（形だけ文字列の不正値を弾く）。 */
+function isUuidString(value: unknown): boolean {
+  return typeof value === "string" && UUID_PATTERN.test(value);
+}
+
+/** `accountId` が 12 桁 AWS アカウント ID 文字列か。 */
+function isAccountIdString(value: unknown): boolean {
+  return typeof value === "string" && ACCOUNT_ID_PATTERN.test(value);
+}
+
+/**
  * 値が `AccountMeta` の形をしているか判定する型ガード。
  * Native Messaging の `items` 応答（AccountMeta[]）を SW 境界で検証する用途。
+ * `uuid` は正規 UUID 形式、`accountId` は 12 桁数字であることまで検証し、形だけ文字列の不正値を弾く。
  * 秘匿フィールド（password / totpSeed）は型に存在しないため検証対象にもならない。
  */
 export function isAccountMeta(value: unknown): value is AccountMeta {
@@ -118,8 +138,8 @@ export function isAccountMeta(value: unknown): value is AccountMeta {
   }
   const meta = value as Record<string, unknown>;
   return (
-    typeof meta["uuid"] === "string" &&
-    typeof meta["accountId"] === "string" &&
+    isUuidString(meta["uuid"]) &&
+    isAccountIdString(meta["accountId"]) &&
     typeof meta["username"] === "string" &&
     typeof meta["mfaEnabled"] === "boolean" &&
     (!("alias" in meta) || typeof meta["alias"] === "string") &&
