@@ -6,7 +6,8 @@
   "description": "AWS Console Switcher Native Messaging host (bw CLI wrapper). Skeleton only; implemented in task 2.",
   "license": "MIT",
   "scripts": {
-    "typecheck": "tsc --noEmit -p tsconfig.json"
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "clean": "rm -rf dist"
   },
   "dependencies": {
     "@acs/shared": "*"
