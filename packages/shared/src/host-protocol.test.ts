@@ -10,6 +10,8 @@ import {
   isFolderSummary,
   type HostRequest,
   type HostResponse,
+  type HostRequestType,
+  type HostResponseType,
 } from "./host-protocol.js";
 
 // --- Compile-time enforcement: every request/response carries requestId: string ---
@@ -22,10 +24,28 @@ type _RequestsCarryRequestId = Assert<
 type _ResponsesCarryRequestId = Assert<
   HostResponse extends { requestId: string } ? true : false
 >;
+
+// --- Compile-time enforcement: 判別 discriminant の SSOT 整合（HOST_*_TYPES ⇔ union） ---
+// HOST_REQUEST_TYPES / HOST_RESPONSE_TYPES を discriminant の SSOT と称する以上、
+// HostRequest["type"] / HostResponse["type"] と「集合として完全一致」していなければ
+// SSOT が破れる。以下はその双方向一致を tsc で強制する（配列側・union 側のどちらに
+// 余剰リテラルが現れても型エラーになる）。
+// Equals は関数型を介した不変（invariant）等価判定。裸の型引数を使う `extends` は
+// union 上で distributive conditional に展開され片側の余剰を見逃しうるため用いない。
+type Equals<A, B> =
+  (<T>() => T extends A ? 1 : 2) extends (<T>() => T extends B ? 1 : 2)
+    ? true
+    : false;
+type _RequestTypesMatchSSOT = Assert<Equals<HostRequest["type"], HostRequestType>>;
+type _ResponseTypesMatchSSOT = Assert<
+  Equals<HostResponse["type"], HostResponseType>
+>;
 // 型パラメータの利用を確定させ、未使用扱いを避ける。
 export type __TypeLevelChecks = [
   _RequestsCarryRequestId,
   _ResponsesCarryRequestId,
+  _RequestTypesMatchSSOT,
+  _ResponseTypesMatchSSOT,
 ];
 
 describe("protocol type catalogs", () => {
