@@ -1,0 +1,31 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+*.tsbuildinfo
+
+# Test coverage
+coverage/
+
+# Vite cache
+.vite/
+
+# Logs
+*.log
+npm-debug.log*
+
+# Editor / OS
+.DS_Store
+*.swp
+
+# Local secrets / env (never commit)
+.env
+.env.*
+!.env.example
+
+# AI agent local tool state (not project config; machine-local artifacts)
+.omo/
+.nexus/
+.sisyphus/
+.akane/

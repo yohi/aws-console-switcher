@@ -1,0 +1,28 @@
+{
+  "name": "aws-console-switcher",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Chrome MV3 extension that minimizes context-switching between multiple AWS IAM console accounts, using a Bitwarden Password Manager Vault as the credential SSOT via a Native Messaging host.",
+  "license": "MIT",
+  "author": "Yusuke Ohi",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "workspaces": [
+    "packages/shared",
+    "packages/extension",
+    "packages/native-host"
+  ],
+  "scripts": {
+    "build": "npm run build -w @acs/shared && npm run build -w @acs/extension",
+    "test": "npm run test --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "clean": "npm run clean --workspaces --if-present"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.43",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.9"
+  }
+}
