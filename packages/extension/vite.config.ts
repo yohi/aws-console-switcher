@@ -7,7 +7,7 @@ import manifest from "./manifest.config.js";
  * MV3 拡張のビルド構成（Service Worker / Content Scripts / Popup を分離してバンドル）。
  * `@acs/shared` は共有契約のソースへ alias し、ビルド順依存を避けて Vite が直接トランスパイルする。
  */
-export default defineConfig({
+export default defineConfig(({ mode }) => ({
   resolve: {
     alias: {
       "@acs/shared": fileURLToPath(
@@ -18,7 +18,7 @@ export default defineConfig({
   plugins: [crx({ manifest })],
   build: {
     target: "esnext",
-    sourcemap: true,
+    sourcemap: mode === "development",
     emptyOutDir: true,
   },
-});
+}));
