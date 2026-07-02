@@ -1,0 +1,16 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "types": ["chrome"],
+    "paths": {
+      "@acs/shared": ["../shared/src/index.ts"]
+    },
+    "noEmit": true
+  },
+  "include": [
+    "src/service-worker/**/*.ts",
+    "src/content-scripts/**/*.ts",
+    "src/popup/**/*.ts"
+  ]
+}

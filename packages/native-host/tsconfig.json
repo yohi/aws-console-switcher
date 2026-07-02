@@ -1,0 +1,12 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2023"],
+    "types": ["node"],
+    "paths": {
+      "@acs/shared": ["../shared/src/index.ts"]
+    },
+    "noEmit": true
+  },
+  "include": ["src/**/*.ts"]
+}

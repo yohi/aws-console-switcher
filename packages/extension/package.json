@@ -1,0 +1,23 @@
+{
+  "name": "@acs/extension",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "AWS Console Switcher Chrome MV3 extension (Service Worker / Content Scripts / Popup).",
+  "license": "MIT",
+  "scripts": {
+    "build": "vite build",
+    "build:dev": "vite build --mode development",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.node.json",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@acs/shared": "*"
+  },
+  "devDependencies": {
+    "@crxjs/vite-plugin": "^2.7.1",
+    "@types/chrome": "^0.2.2",
+    "vite": "^8.1.2"
+  }
+}
