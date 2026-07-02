@@ -21,7 +21,7 @@
     "clean": "npm run clean --workspaces --if-present"
   },
   "devDependencies": {
-    "@types/node": "^26.1.0",
+    "@types/node": "^20.19.43",
     "typescript": "^6.0.3",
     "vitest": "^4.1.9"
   }
