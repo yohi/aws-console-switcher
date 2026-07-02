@@ -45,6 +45,12 @@ export default defineManifest((env) => {
       service_worker: "src/service-worker/service-worker.ts",
       type: "module",
     },
+    // NOTE: console-detector-content-script.ts (console.aws.amazon.com 向け) はここには含めず、
+    // chrome.scripting.executeScript での動的注入を想定している（design.md 5.3）。
+    // TODO(task 5.3): 動的注入を実装する際は、本 manifest に `web_accessible_resources`
+    // エントリ（あるいは vite.config.ts への追加ビルドエントリ）を配線すること。
+    // 現状は manifest から未参照のため @crxjs/vite-plugin がこのファイルを dist に
+    // バンドルせず、実行時に `chrome.scripting.executeScript({ files: [...] })` が失敗する。
     content_scripts: [
       {
         matches: SIGNIN_MATCHES,
