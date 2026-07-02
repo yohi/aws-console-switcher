@@ -353,6 +353,7 @@ interface SessionManager {
 
 - **switchTo の実体**: `SessionRecord.tabId` を用い `chrome.tabs.update(tabId, { active: true })` ＋ `chrome.windows.update(windowId, { focused: true })` で前面化する。`tabId` が無効（タブ閉鎖）なら新規ログインへフォールバック（C-3）。
 - **evictIfNeeded の実体**: `lastAccessedAt` 昇順で最古セッションを選び、`SessionRecord` を削除する（AWS 側セッションは保持しタブはバックグラウンドに残す）。AWS サインアウト DOM 操作は行わない（M-6）。呼び出しタイミング: `switchTo` 内で対象アカウントが未サインインと判定し新規ログインを確定させる直前に同期的に呼び出し、`getActiveSessions().length >= 5` の場合のみ 1 件退避してから新規セッションを追加する（同時上限 5 を一時的にも超過させない, 3.2.1）。
+- **並行 `switchTo` 呼び出しに対する排他制御（TOCTOU 対策）**: `getActiveSessions` による上限判定 → `evictIfNeeded` → 新規 `SessionRecord` 追加は一連のクリティカルセクションだが、`chrome.storage.local` の read–check–write のみでは保護されない。Service Worker の非同期モデルでは、2 つの `switchTo` 呼び出しが `await` ポイントで交互実行されうるため、セッション数 4 の状態で 2 呼び出しが競合すると両方が `length >= 5` を `false` として通過し、同時上限 5 を一時的に超過する（3.2.1 の保証に反する）。これを防ぐため、SW インスタンス内メモリに保持する単一の Promise チェーン（直列化キュー）でこのクリティカルセクション全体をラップし、同時に 1 呼び出しのみが当該区間へ進入できるようにする。SW は単一インスタンス・シングルスレッドで動作するため、インメモリの直列化のみで十分であり、`chrome.storage.local` 側にロック機構を追加実装する必要はない。SW が休止・再起動した場合は直列化キューも消滅するが、進行中だった呼び出し自体も同時に失われるため、セッション数の整合性は損なわれない。
 - **lastAccessedAt の更新**: ログイン完了（`done`）時に `signedInAt` と同値で初期化し、`switchTo` 実行時に現在時刻へ更新する。さらにユーザーの直接タブ操作を反映するため、`chrome.tabs.onActivated` で活性化タブが追跡中セッションの `tabId` と一致したら `lastAccessedAt` を更新する（switchTo 非経由の利用が LRU 退避対象になるのを防ぐ, Issue 4）。
 - **Contract Visibility**: 既定実装は Bitwarden 用 `CredentialProvider` ＋ Native Messaging 用 `SecretSourceAdapter`。SSO 移行時は本ポートの別実装を注入する。
 
