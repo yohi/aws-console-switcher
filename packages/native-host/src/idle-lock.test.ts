@@ -147,4 +147,34 @@ describe("startIdleLockTimer", () => {
       vi.useRealTimers();
     }
   });
+
+  it("does not clear session if it changed while lock was in flight", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-03T01:00:00.000Z"));
+    const lockCalls: string[] = [];
+    const session = createSessionManager(() => new Date(Date.now()));
+    session.configure({ idleLockMinutes: 1, totpMinRemainingSeconds: 5 });
+    session.unlock("bw-session-token");
+    const timer = startIdleLockTimer({
+      bwCli: makeFakeBwCli(lockCalls, async () => {
+        // Simulate an unlock/relogin happening while lock is pending.
+        session.unlock("new-bw-session-token");
+        return ok("");
+      }),
+      session,
+      intervalMs: 1_000,
+    });
+
+    try {
+      // When: the timer observes idle time and attempts to lock.
+      await vi.advanceTimersByTimeAsync(61_000);
+
+      // Then: bw lock ran against the original token, but the new session stays intact.
+      expect(lockCalls).toEqual(["bw-session-token"]);
+      expect(session.currentSession()).toBe("new-bw-session-token");
+    } finally {
+      timer.stop();
+      vi.useRealTimers();
+    }
+  });
 });

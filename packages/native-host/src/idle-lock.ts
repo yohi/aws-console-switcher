@@ -36,7 +36,7 @@ export function startIdleLockTimer(deps: IdleLockTimerDependencies): IdleLockTim
     lockInFlight = true;
     try {
       const lockResult = await deps.bwCli.lock(sessionToken);
-      if (lockResult.ok) {
+      if (lockResult.ok && deps.session.currentSession() === sessionToken) {
         deps.session.lock();
       }
     } finally {
