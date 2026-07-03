@@ -29,8 +29,8 @@ const defaultDispatcher = createHostDispatcher(defaultDependencies);
 
 export function createDefaultHostDispatcherDependencies(): HostDispatcherDependencies {
   return {
-  bwCli: createBwCli(),
-  session: createSessionManager(),
+    bwCli: createBwCli(),
+    session: createSessionManager(),
   };
 }
 
@@ -99,6 +99,8 @@ async function dispatchRequest(
         deps.session.unlock(result.value);
         return { requestId: request.requestId, type: "unlocked" };
       } finally {
+        // Note: JS strings are immutable; this only clears the local reference,
+        // not the underlying bytes. Secret wiping is not possible in this runtime.
         masterPassword = "";
       }
     }
