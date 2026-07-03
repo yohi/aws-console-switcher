@@ -10,6 +10,7 @@ import {
   isFlowErrorCode,
   isTrueObjectMissing,
   isTransientPreconditionError,
+  type FlowErrorCode,
   type FlowError,
 } from "./flow-error.js";
 
@@ -22,7 +23,7 @@ describe("category / code catalogs", () => {
     ]);
   });
 
-  it("declares the twelve design.md FlowErrorCode values", () => {
+  it("declares the design.md FlowErrorCode values plus native-host request errors", () => {
     expect([...FLOW_ERROR_CODES]).toEqual([
       "host_not_running",
       "host_disconnected",
@@ -36,12 +37,14 @@ describe("category / code catalogs", () => {
       "selector_not_found",
       "page_not_rendered",
       "captcha_detected",
+      "malformed_request",
+      "invalid_configuration",
     ]);
   });
 });
 
 describe("categoryForCode", () => {
-  it("maps host / vault / object-missing errors to precondition", () => {
+  it("maps host / vault / object-missing / request errors to precondition", () => {
     for (const code of [
       "host_not_running",
       "host_disconnected",
@@ -49,12 +52,20 @@ describe("categoryForCode", () => {
       "vault_locked",
       "item_not_found",
       "invalid_uuid",
-    ] as const) {
+      "malformed_request",
+      "invalid_configuration",
+    ] as FlowErrorCode[]) {
       expect(categoryForCode(code)).toBe("precondition");
     }
   });
 
   it("maps credential / TOTP errors to aws_auth", () => {
+    for (const code of ["bad_password", "account_locked", "totp_rejected"] as const) {
+      expect(categoryForCode(code)).toBe("aws_auth");
+    }
+  });
+
+  it("maps selector / render / captcha errors to dom_timeout", () => {
     for (const code of ["bad_password", "account_locked", "totp_rejected"] as const) {
       expect(categoryForCode(code)).toBe("aws_auth");
     }
