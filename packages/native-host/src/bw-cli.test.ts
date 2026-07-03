@@ -1,5 +1,8 @@
+import { mkdtemp, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { createBwCli, type BwCommand, type CommandOutcome } from "./bw-cli.js";
+import { createBwCli, spawnBwCommand, type BwCommand, type CommandOutcome } from "./bw-cli.js";
 
 describe("createBwCli", () => {
   it("runs bw unlock with --raw and --passwordenv, returning BW_SESSION", async () => {
@@ -42,6 +45,27 @@ describe("createBwCli", () => {
     if (!result.ok) {
       expect(result.error.category).toBe("precondition");
       expect(result.error.code).toBe("bad_password");
+    }
+  });
+
+  it("classifies an unlock start failure as host_not_running", async () => {
+    // Given: bw could not start and reports a null exit code.
+    const runner = async (): Promise<CommandOutcome> => ({
+      exitCode: null,
+      stdout: "",
+      stderr: "",
+    });
+    const cli = createBwCli(runner);
+
+    // When: unlock fails before bw can produce password-specific output.
+    const result = await cli.unlock("correct horse battery staple");
+
+    // Then: callers receive the same start-failure precondition used by other bw commands.
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.category).toBe("precondition");
+      expect(result.error.code).toBe("host_not_running");
+      expect(result.error.message).toBe("Bitwarden CLI could not be started.");
     }
   });
 
@@ -109,6 +133,25 @@ describe("createBwCli", () => {
         env: expect.objectContaining({ BW_SESSION: "bw-session-token" }),
       },
     ]);
+  });
+
+  it("times out a hanging bw process and resolves as a start failure", async () => {
+    // Given: a fake bw executable that never exits on its own.
+    const binDir = await mkdtemp(join(tmpdir(), "acs-bw-timeout-"));
+    const bwPath = join(binDir, "bw");
+    await writeFile(bwPath, "#!/usr/bin/env sh\nwhile true; do sleep 1; done\n", { mode: 0o755 });
+
+    // When: the spawn runner is called with a short timeout.
+    const outcome = await spawnBwCommand(
+      {
+        args: ["status"],
+        env: { ...process.env, PATH: `${binDir}:${process.env["PATH"] ?? ""}` },
+      },
+      10,
+    );
+
+    // Then: the Promise resolves with the existing null-exit start-failure shape.
+    expect(outcome).toEqual({ exitCode: null, stdout: "", stderr: "" });
   });
 
 });

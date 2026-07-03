@@ -36,6 +36,7 @@ interface RunCommandRequest {
 type PreconditionErrorCode = "bad_password" | "host_not_running" | "vault_locked";
 
 const BW_COMMAND = "bw";
+const DEFAULT_BW_COMMAND_TIMEOUT_MS = 10_000;
 const PASSWORD_ENV_PREFIX = "ACS_BW_MASTER_PASSWORD_";
 
 export function createBwCli(runner: CommandRunner = spawnBwCommand): BwCli {
@@ -123,6 +124,10 @@ async function unlockVault(
   }
 
   const outcome = outcomeResult.value;
+  if (outcome.exitCode === null) {
+    return err(preconditionError("host_not_running", "Bitwarden CLI could not be started."));
+  }
+
   if (outcome.exitCode === 0) {
     const sessionToken = outcome.stdout.trim();
     return sessionToken.length > 0
@@ -185,7 +190,10 @@ async function settleOutcome(
   }
 }
 
-function spawnBwCommand(command: BwCommand): Promise<CommandOutcome> {
+export function spawnBwCommand(
+  command: BwCommand,
+  timeoutMs = DEFAULT_BW_COMMAND_TIMEOUT_MS,
+): Promise<CommandOutcome> {
   return new Promise<CommandOutcome>((resolve) => {
     const child = spawn(BW_COMMAND, [...command.args], {
       env: command.env,
@@ -194,6 +202,18 @@ function spawnBwCommand(command: BwCommand): Promise<CommandOutcome> {
     let stdout = "";
     let stderr = "";
     let settled = false;
+    const timeout = setTimeout(() => {
+      child.kill();
+      settle({ exitCode: null, stdout: "", stderr: "" });
+    }, timeoutMs);
+
+    const settle = (outcome: CommandOutcome): void => {
+      if (!settled) {
+        settled = true;
+        clearTimeout(timeout);
+        resolve(outcome);
+      }
+    };
 
     child.stdout.setEncoding("utf8");
     child.stderr.setEncoding("utf8");
@@ -204,16 +224,10 @@ function spawnBwCommand(command: BwCommand): Promise<CommandOutcome> {
       stderr += String(chunk);
     });
     child.on("error", () => {
-      if (!settled) {
-        settled = true;
-        resolve({ exitCode: null, stdout: "", stderr: "" });
-      }
+      settle({ exitCode: null, stdout: "", stderr: "" });
     });
     child.on("close", (exitCode: number | null) => {
-      if (!settled) {
-        settled = true;
-        resolve({ exitCode, stdout, stderr });
-      }
+      settle({ exitCode, stdout, stderr });
     });
   });
 }
