@@ -7,9 +7,14 @@
   "license": "MIT",
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "clean": "rm -rf dist"
   },
   "dependencies": {
     "@acs/shared": "*"
+  },
+  "devDependencies": {
+    "vitest": "^4.1.9"
   }
 }

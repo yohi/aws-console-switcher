@@ -14,7 +14,6 @@ export const FAILURE_CATEGORIES = [
 ] as const;
 export type FailureCategory = (typeof FAILURE_CATEGORIES)[number];
 
-/** design.md `FlowErrorCode` の網羅列挙（12 コード）。 */
 export const FLOW_ERROR_CODES = [
   "host_not_running",
   "host_disconnected",
@@ -28,6 +27,8 @@ export const FLOW_ERROR_CODES = [
   "selector_not_found",
   "page_not_rendered",
   "captcha_detected",
+  "malformed_request",
+  "invalid_configuration",
 ] as const;
 export type FlowErrorCode = (typeof FLOW_ERROR_CODES)[number];
 
@@ -63,6 +64,8 @@ const CODE_TO_CATEGORY: Record<FlowErrorCode, FailureCategory> = {
   selector_not_found: "dom_timeout",
   page_not_rendered: "dom_timeout",
   captcha_detected: "dom_timeout",
+  malformed_request: "precondition",
+  invalid_configuration: "precondition",
 };
 
 /**
@@ -82,6 +85,8 @@ const DEFAULT_RETRIABLE: Record<FlowErrorCode, boolean> = {
   selector_not_found: false,
   page_not_rendered: false,
   captcha_detected: false,
+  malformed_request: false,
+  invalid_configuration: false,
 };
 
 /** エラーコードの正準カテゴリを返す。 */
