@@ -45,6 +45,7 @@ if (entryPath !== undefined && import.meta.url === pathToFileURL(entryPath).href
     await runNativeHost(stdin, stdout);
   } catch (error) {
     if (error instanceof Error) {
+      console.error("Native host crashed.", error);
       process.exitCode = 1;
     } else {
       throw error;
