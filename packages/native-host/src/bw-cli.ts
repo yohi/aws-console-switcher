@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { err, ok, type FlowError, type Result } from "@acs/shared";
+import { err, makeFlowError, ok, type FlowError, type Result } from "@acs/shared";
 import { classifyBwFailure, classifyUnlockFailure, commandStartError } from "./bw-errors.js";
 
 export interface BwCommand {
@@ -33,8 +33,6 @@ interface RunCommandRequest {
   readonly failureError: (stderr: string) => FlowError;
 }
 
-type PreconditionErrorCode = "bad_password" | "host_not_running" | "vault_locked";
-
 const BW_COMMAND = "bw";
 const DEFAULT_BW_COMMAND_TIMEOUT_MS = 10_000;
 const PASSWORD_ENV_PREFIX = "ACS_BW_MASTER_PASSWORD_";
@@ -49,7 +47,7 @@ export function createBwCli(runner: CommandRunner = spawnBwCommand): BwCli {
         runner,
         args: ["lock"],
         env: childEnv(sessionToken),
-        failureError: () => preconditionError("vault_locked", "Bitwarden vault could not be locked."),
+        failureError: () => makeFlowError("vault_locked", "Bitwarden vault could not be locked."),
       });
     },
     status(sessionToken?: string): Promise<Result<string, FlowError>> {
@@ -57,7 +55,7 @@ export function createBwCli(runner: CommandRunner = spawnBwCommand): BwCli {
         runner,
         args: ["status"],
         env: childEnv(sessionToken),
-        failureError: () => preconditionError("vault_locked", "Bitwarden vault status could not be read."),
+        failureError: () => makeFlowError("vault_locked", "Bitwarden vault status could not be read."),
       });
     },
     listFolders(sessionToken?: string): Promise<Result<string, FlowError>> {
@@ -114,7 +112,7 @@ async function unlockVault(
     if (error instanceof Error) {
       return err(commandStartError());
     }
-    return err(commandStartError());
+    throw error;
   }
   delete env[passwordEnvName];
 
@@ -125,16 +123,15 @@ async function unlockVault(
 
   const outcome = outcomeResult.value;
   if (outcome.exitCode === null) {
-    return err(preconditionError("host_not_running", "Bitwarden CLI could not be started."));
+    return err(makeFlowError("host_not_running", "Bitwarden CLI could not be started."));
   }
 
   if (outcome.exitCode === 0) {
     const sessionToken = outcome.stdout.trim();
     return sessionToken.length > 0
       ? ok(sessionToken)
-      : err(preconditionError("vault_locked", "Bitwarden vault did not return a session."));
+      : err(makeFlowError("vault_locked", "Bitwarden vault did not return a session."));
   }
-
   return err(classifyUnlockFailure(failureOutput(outcome)));
 }
 
@@ -153,9 +150,8 @@ async function runBwCommand(request: RunCommandRequest): Promise<Result<string, 
   }
 
   if (outcome.exitCode === null) {
-    return err(preconditionError("host_not_running", "Bitwarden CLI could not be started."));
+    return err(makeFlowError("host_not_running", "Bitwarden CLI could not be started."));
   }
-
   return err(request.failureError(failureOutput(outcome)));
 }
 
@@ -238,8 +234,4 @@ function childEnv(sessionToken?: string): NodeJS.ProcessEnv {
     env["BW_SESSION"] = sessionToken;
   }
   return env;
-}
-
-function preconditionError(code: PreconditionErrorCode, message: string): FlowError {
-  return { category: "precondition", code, message, retriable: false };
 }
