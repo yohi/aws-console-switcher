@@ -160,8 +160,7 @@ describe("handleRequest", () => {
     for (const response of responses) {
       expect(response.type).toBe("error");
       if (response.type === "error") {
-        expect(response.error.code).toBe("host_not_running");
-        expect(response.error.category).toBe("precondition");
+        expect(response.error.code).toBe("invalid_configuration");
       }
     }
   });
@@ -283,7 +282,7 @@ describe("handleIncomingMessage", () => {
     expect(response.type).toBe("error");
     if (response.type === "error") {
       expect(response.error.category).toBe("precondition");
-      expect(response.error.code).toBe("host_not_running");
+      expect(response.error.code).toBe("malformed_request");
     }
   });
 
@@ -300,7 +299,7 @@ describe("handleIncomingMessage", () => {
       type: "error",
       error: {
         category: "precondition",
-        code: "host_not_running",
+        code: "malformed_request",
         message: "Malformed Native Messaging request.",
         retriable: false,
       },

@@ -3,12 +3,11 @@ import {
   isHostRequest,
   makeFlowError,
   type FlowError,
-  type FlowErrorCode,
   type HostRequest,
   type HostResponse,
 } from "@acs/shared";
-import { parseAccountMetas, parseFolderSummaries, parseItemSecret } from "./bw-json.js";
 import { createBwCli, type BwCli } from "./bw-cli.js";
+import { parseAccountMetas, parseFolderSummaries, parseItemSecret } from "./bw-json.js";
 import { createSessionManager, type HostSettings, type SessionManager } from "./session.js";
 import { getTotpCodeWithWindowWait } from "./totp-wait.js";
 
@@ -24,8 +23,6 @@ export interface HostDispatcher {
   readonly handleRequest: (request: HostRequest) => Promise<HostResponse>;
 }
 
-const defaultDependencies = createDefaultHostDispatcherDependencies();
-const defaultDispatcher = createHostDispatcher(defaultDependencies);
 
 export function createDefaultHostDispatcherDependencies(): HostDispatcherDependencies {
   return {
@@ -34,7 +31,13 @@ export function createDefaultHostDispatcherDependencies(): HostDispatcherDepende
   };
 }
 
+let defaultDependencies: HostDispatcherDependencies | undefined;
+let defaultDispatcher: HostDispatcher | undefined;
+
 export function defaultHostDispatcherDependencies(): HostDispatcherDependencies {
+  if (defaultDependencies === undefined) {
+    defaultDependencies = createDefaultHostDispatcherDependencies();
+  }
   return defaultDependencies;
 }
 
@@ -54,7 +57,7 @@ export function createHostDispatcher(deps: HostDispatcherDependencies): HostDisp
       if (error instanceof Error) {
         return makeErrorResponse(
           request.requestId,
-          flowError("host_not_running", "Native host handler failed."),
+          hostNotRunningError("Native host handler failed."),
         );
       }
       throw error;
@@ -66,7 +69,7 @@ export function createHostDispatcher(deps: HostDispatcherDependencies): HostDisp
       if (!isHostRequest(message)) {
         return makeErrorResponse(
           requestIdFrom(message),
-          makeFlowError("host_not_running", "Malformed Native Messaging request."),
+          makeFlowError("malformed_request", "Malformed Native Messaging request."),
         );
       }
 
@@ -75,13 +78,21 @@ export function createHostDispatcher(deps: HostDispatcherDependencies): HostDisp
     handleRequest: handleRequestForDeps,
   };
 }
-
 export function handleIncomingMessage(message: unknown): Promise<HostResponse> {
-  return defaultDispatcher.handleIncomingMessage(message);
+  const dispatcher = defaultHostDispatcher();
+  return dispatcher.handleIncomingMessage(message);
 }
 
 export function handleRequest(request: HostRequest): Promise<HostResponse> {
-  return defaultDispatcher.handleRequest(request);
+  const dispatcher = defaultHostDispatcher();
+  return dispatcher.handleRequest(request);
+}
+
+function defaultHostDispatcher(): HostDispatcher {
+  if (defaultDispatcher === undefined) {
+    defaultDispatcher = createHostDispatcher(defaultHostDispatcherDependencies());
+  }
+  return defaultDispatcher;
 }
 
 async function dispatchRequest(
@@ -106,11 +117,12 @@ async function dispatchRequest(
     }
     case "lock": {
       const sessionToken = deps.session.currentSession();
-      deps.session.lock();
       const result = await deps.bwCli.lock(sessionToken);
-      return result.ok
-        ? { requestId: request.requestId, type: "locked" }
-        : makeErrorResponse(request.requestId, result.error);
+      if (!result.ok) {
+        return makeErrorResponse(request.requestId, result.error);
+      }
+      deps.session.lock();
+      return { requestId: request.requestId, type: "locked" };
     }
     case "status": {
       const status = deps.session.status();
@@ -204,7 +216,6 @@ function configureHost(
   if (!isValidTotpMinRemainingSeconds(request.totpMinRemainingSeconds)) {
     return makeErrorResponse(request.requestId, invalidConfigurationError());
   }
-
   const settings: HostSettings = {
     idleLockMinutes: request.idleLockMinutes,
     totpMinRemainingSeconds: request.totpMinRemainingSeconds,
@@ -222,11 +233,11 @@ function isValidTotpMinRemainingSeconds(value: number): boolean {
 }
 
 function invalidConfigurationError(): FlowError {
-  return makeFlowError("host_not_running", "Invalid native host configuration.");
+  return makeFlowError("invalid_configuration", "Invalid native host configuration.");
 }
 
-function flowError(code: FlowErrorCode, message: string): FlowError {
-  return makeFlowError(code, message);
+function hostNotRunningError(message: string): FlowError {
+  return makeFlowError("host_not_running", message);
 }
 
 function vaultLockedError(): FlowError {
