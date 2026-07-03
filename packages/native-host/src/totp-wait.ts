@@ -1,8 +1,20 @@
 import { err, ok, type FlowError, type Result } from "@acs/shared";
 
-const TOTP_WINDOW_SECONDS = 30;
+/** Default TOTP period used when the authenticator entry does not expose a custom period. */
+const DEFAULT_TOTP_PERIOD_SECONDS = 30;
 const MILLISECONDS_PER_SECOND = 1_000;
 
+/**
+ * Calculates the remaining seconds in the current TOTP window.
+ * @param nowMs - Current timestamp in milliseconds.
+ * @param periodSeconds - TOTP period in seconds; defaults to {@link DEFAULT_TOTP_PERIOD_SECONDS}.
+ */
+export function remainingTotpSeconds(
+  nowMs: number = Date.now(),
+  periodSeconds: number = DEFAULT_TOTP_PERIOD_SECONDS,
+): number {
+  return periodSeconds - (Math.floor(nowMs / MILLISECONDS_PER_SECOND) % periodSeconds);
+}
 export interface TotpCodeWithRemainingSeconds {
   readonly code: string;
   readonly remainingSeconds: number;
@@ -25,10 +37,6 @@ export class TotpWaitAbortedError extends Error {
     super("TOTP wait was aborted.");
     this.name = "TotpWaitAbortedError";
   }
-}
-
-export function remainingTotpSeconds(nowMs: number = Date.now()): number {
-  return TOTP_WINDOW_SECONDS - (Math.floor(nowMs / MILLISECONDS_PER_SECOND) % TOTP_WINDOW_SECONDS);
 }
 
 export async function getTotpCodeWithWindowWait(
