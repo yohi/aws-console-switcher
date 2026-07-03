@@ -1,6 +1,10 @@
 import { ok } from "@acs/shared";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { getTotpCodeWithWindowWait, remainingTotpSeconds } from "./totp-wait.js";
+import {
+  getTotpCodeWithWindowWait,
+  remainingTotpSeconds,
+  TotpWaitAbortedError,
+} from "./totp-wait.js";
 
 describe("remainingTotpSeconds", () => {
   it("computes the remaining seconds in the current 30-second window", () => {
@@ -122,5 +126,35 @@ describe("getTotpCodeWithWindowWait", () => {
     const result = await resultPromise;
     expect(result).toEqual({ ok: true, value: { code: "222222", remainingSeconds: 29 } });
     expect(fetchCalls).toEqual(["111111", "222222"]);
+  });
+
+  it("returns a FlowError Result when the wait is aborted", async () => {
+    // Given: the first code is too close to expiry and the configured sleep aborts.
+    const fetchCalls: string[] = [];
+
+    // When: the wait rejects with the typed abort error.
+    const result = await getTotpCodeWithWindowWait({
+      minRemainingSeconds: 5,
+      fetchCode: async () => {
+        fetchCalls.push("fetch");
+        return ok("123456");
+      },
+      nowMs: () => 28_000,
+      sleep: async () => {
+        throw new TotpWaitAbortedError();
+      },
+    });
+
+    // Then: callers receive a typed FlowError Result instead of an escaped rejection.
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toEqual({
+        category: "precondition",
+        code: "host_disconnected",
+        message: "TOTP wait was aborted.",
+        retriable: false,
+      });
+    }
+    expect(fetchCalls).toEqual(["fetch"]);
   });
 });

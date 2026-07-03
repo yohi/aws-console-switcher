@@ -46,7 +46,19 @@ export async function getTotpCodeWithWindowWait(
     return ok({ code: initialResult.value.trim(), remainingSeconds: initialRemainingSeconds });
   }
 
-  await sleep((initialRemainingSeconds + 1) * MILLISECONDS_PER_SECOND, options.signal);
+  try {
+    await sleep((initialRemainingSeconds + 1) * MILLISECONDS_PER_SECOND, options.signal);
+  } catch (error) {
+    if (error instanceof TotpWaitAbortedError) {
+      return err({
+        category: "precondition",
+        code: "host_disconnected",
+        message: "TOTP wait was aborted.",
+        retriable: false,
+      });
+    }
+    throw error;
+  }
 
   const refreshedResult = await options.fetchCode();
   if (!refreshedResult.ok) {
