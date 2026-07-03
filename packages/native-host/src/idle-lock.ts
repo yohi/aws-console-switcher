@@ -34,13 +34,24 @@ export function startIdleLockTimer(deps: IdleLockTimerDependencies): IdleLockTim
     }
 
     lockInFlight = true;
-    await deps.bwCli.lock(sessionToken);
-    deps.session.lock();
-    lockInFlight = false;
+    try {
+      const lockResult = await deps.bwCli.lock(sessionToken);
+      if (lockResult.ok) {
+        deps.session.lock();
+      }
+    } finally {
+      lockInFlight = false;
+    }
   };
 
   const timer = setInterval(() => {
-    void checkIdleLock();
+    void checkIdleLock().catch((error: unknown) => {
+      if (error instanceof Error) {
+        console.error("Idle lock check failed.", error);
+        return;
+      }
+      console.error("Idle lock check failed.", String(error));
+    });
   }, deps.intervalMs ?? DEFAULT_IDLE_LOCK_CHECK_INTERVAL_MS);
   unrefTimer(timer);
 
