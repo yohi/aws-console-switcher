@@ -173,7 +173,7 @@ async function runCommand(
     if (error instanceof Error) {
       return err(commandStartError());
     }
-    return err(commandStartError());
+    throw error;
   }
 }
 
@@ -186,7 +186,7 @@ async function settleOutcome(
     if (error instanceof Error) {
       return err(commandStartError());
     }
-    return err(commandStartError());
+    throw error;
   }
 }
 
