@@ -48,4 +48,32 @@ describe("SessionManager", () => {
       lastUsedAt: "2026-07-03T01:02:03.004Z",
     });
   });
+
+  it("rejects invalid idle lock minutes before storing settings", () => {
+    // Given: a session manager with default settings.
+    const session = createSessionManager();
+
+    for (const idleLockMinutes of [0, -1, Number.NaN, Number.POSITIVE_INFINITY]) {
+      // When / Then: invalid idle lock durations are rejected as range errors.
+      expect(() => {
+        session.configure({ idleLockMinutes, totpMinRemainingSeconds: 5 });
+      }).toThrow(RangeError);
+    }
+
+    expect(session.settings()).toEqual({ idleLockMinutes: 20, totpMinRemainingSeconds: 5 });
+  });
+
+  it("rejects invalid TOTP minimum remaining seconds before storing settings", () => {
+    // Given: a session manager with default settings.
+    const session = createSessionManager();
+
+    for (const totpMinRemainingSeconds of [-1, Number.NaN, Number.POSITIVE_INFINITY]) {
+      // When / Then: invalid TOTP thresholds are rejected as range errors.
+      expect(() => {
+        session.configure({ idleLockMinutes: 20, totpMinRemainingSeconds });
+      }).toThrow(RangeError);
+    }
+
+    expect(session.settings()).toEqual({ idleLockMinutes: 20, totpMinRemainingSeconds: 5 });
+  });
 });

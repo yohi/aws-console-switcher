@@ -46,6 +46,15 @@ export function createSessionManager(clock = (): Date => new Date()): SessionMan
       markUsed();
     },
     configure(settings: HostSettings): void {
+      if (!Number.isFinite(settings.idleLockMinutes) || settings.idleLockMinutes <= 0) {
+        throw new RangeError("idleLockMinutes must be a finite positive number.");
+      }
+      if (
+        !Number.isFinite(settings.totpMinRemainingSeconds) ||
+        settings.totpMinRemainingSeconds < 0
+      ) {
+        throw new RangeError("totpMinRemainingSeconds must be a finite non-negative number.");
+      }
       currentSettings = settings;
     },
     settings(): HostSettings {
