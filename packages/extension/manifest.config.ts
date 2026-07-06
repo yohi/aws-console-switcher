@@ -51,6 +51,11 @@ export default defineManifest((env) => {
     // エントリ（あるいは vite.config.ts への追加ビルドエントリ）を配線すること。
     // 現状は manifest から未参照のため @crxjs/vite-plugin がこのファイルを dist に
     // バンドルせず、実行時に `chrome.scripting.executeScript({ files: [...] })` が失敗する。
+    // NOTE(task 9.2 調査): 上記 TODO は意図的に据え置く。理由: (1) SW 側の呼び出し元（handleConsoleState の
+    // chrome.tabs.query + chrome.scripting.executeScript オーケストレーション）が未実装で対をなす配線先が無い。
+    // (2) @crxjs/vite-plugin 2.7.1 は web_accessible_resources に素の .ts を列挙しても予測可能なパスの
+    // 注入用ビルド成果物を生成せず、追加の vite ビルドエントリ変更を要する。(3) npm test / typecheck は crxjs
+    // ビルドを経由しないため投機的追加は検証不能な壊れた設定を招く。呼び出し元実装（後続タスク）と同時に配線すること。
     content_scripts: [
       {
         matches: SIGNIN_MATCHES,
