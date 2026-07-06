@@ -1,12 +1,195 @@
 <!doctype html>
-<html lang="en">
+<html lang="ja">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>AWS Console Switcher</title>
+    <style>
+      :root {
+        --bg: #ffffff;
+        --fg: #1b1b1f;
+        --muted: #5c5f66;
+        --border: #d6d8dd;
+        --accent: #0864c7;
+        --accent-fg: #ffffff;
+        --danger-bg: #fdecea;
+        --danger-fg: #8a1c12;
+        --ok: #1a7f37;
+        --unknown: #8a6d00;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        width: 360px;
+        margin: 0;
+        padding: 12px;
+        font-family:
+          system-ui,
+          -apple-system,
+          "Segoe UI",
+          sans-serif;
+        font-size: 13px;
+        color: var(--fg);
+        background: var(--bg);
+      }
+      h1 {
+        font-size: 14px;
+        margin: 0 0 8px;
+      }
+      .row {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+      }
+      .toolbar {
+        margin-bottom: 8px;
+      }
+      #search {
+        flex: 1;
+        padding: 6px 8px;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        font-size: 13px;
+      }
+      button {
+        padding: 6px 10px;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        background: #f4f5f7;
+        color: var(--fg);
+        cursor: pointer;
+        font-size: 12px;
+      }
+      button.primary {
+        background: var(--accent);
+        color: var(--accent-fg);
+        border-color: var(--accent);
+      }
+      ul {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        max-height: 320px;
+        overflow-y: auto;
+      }
+      .account-row {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+        padding: 8px 4px;
+        border-bottom: 1px solid var(--border);
+      }
+      .account-info {
+        display: flex;
+        flex-direction: column;
+        flex: 1;
+        min-width: 0;
+      }
+      .account-name {
+        font-weight: 600;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .account-meta {
+        color: var(--muted);
+        font-size: 11px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .state-badge {
+        font-size: 11px;
+        padding: 2px 6px;
+        border-radius: 10px;
+        white-space: nowrap;
+      }
+      .state-signed-in {
+        color: var(--ok);
+        background: #e6f4ea;
+      }
+      .state-unknown {
+        color: var(--unknown);
+        background: #fdf3d6;
+      }
+      .state-not-signed-in {
+        color: var(--muted);
+        background: #f0f1f3;
+      }
+      .empty {
+        color: var(--muted);
+        padding: 12px 4px;
+        text-align: center;
+      }
+      #banner {
+        margin-bottom: 8px;
+        padding: 8px 10px;
+        border-radius: 6px;
+        background: var(--danger-bg);
+        color: var(--danger-fg);
+        display: flex;
+        gap: 8px;
+        align-items: center;
+        justify-content: space-between;
+      }
+      .banner-headline {
+        margin: 0;
+        flex: 1;
+      }
+      .banner-action {
+        color: var(--muted);
+        white-space: nowrap;
+      }
+      #unlock-section {
+        margin-top: 10px;
+        padding-top: 10px;
+        border-top: 1px solid var(--border);
+      }
+      #master-password {
+        flex: 1;
+        padding: 6px 8px;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        font-size: 13px;
+      }
+      [hidden] {
+        display: none !important;
+      }
+    </style>
   </head>
   <body>
-    <main id="app"></main>
+    <h1>AWS Console Switcher</h1>
+
+    <div id="banner" role="alert" hidden></div>
+
+    <div class="row toolbar">
+      <input
+        id="search"
+        type="search"
+        placeholder="エイリアス・アカウントID・ユーザー名で検索"
+        autocomplete="off"
+        aria-label="アカウント検索"
+      />
+      <button id="sync-btn" type="button">同期</button>
+      <button id="lock-btn" type="button">ロック</button>
+    </div>
+
+    <ul id="account-list" aria-label="アカウント一覧"></ul>
+
+    <section id="unlock-section" aria-label="Vault アンロック">
+      <form id="unlock-form" class="row">
+        <input
+          id="master-password"
+          type="password"
+          placeholder="マスターパスワード"
+          autocomplete="off"
+          aria-label="マスターパスワード"
+        />
+        <button id="unlock-btn" class="primary" type="submit">アンロック</button>
+      </form>
+    </section>
+
     <script type="module" src="./popup.ts"></script>
   </body>
 </html>
