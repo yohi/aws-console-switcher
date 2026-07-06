@@ -117,6 +117,35 @@ describe("isExtMessage — consoleState", () => {
   });
 });
 
+describe("isExtMessage — updateSettings", () => {
+  it("accepts updateSettings with both numeric fields", () => {
+    expect(
+      isExtMessage({
+        kind: "updateSettings",
+        idleLockMinutes: 20,
+        totpMinRemainingSeconds: 5,
+      }),
+    ).toBe(true);
+  });
+
+  it("accepts updateSettings with a subset (or none) of the optional fields", () => {
+    expect(isExtMessage({ kind: "updateSettings" })).toBe(true);
+    expect(isExtMessage({ kind: "updateSettings", idleLockMinutes: 30 })).toBe(true);
+    expect(
+      isExtMessage({ kind: "updateSettings", totpMinRemainingSeconds: 8 }),
+    ).toBe(true);
+  });
+
+  it("rejects present-but-non-numeric fields", () => {
+    expect(
+      isExtMessage({ kind: "updateSettings", idleLockMinutes: "20" }),
+    ).toBe(false);
+    expect(
+      isExtMessage({ kind: "updateSettings", totpMinRemainingSeconds: null }),
+    ).toBe(false);
+  });
+});
+
 describe("isExtMessage — rejects junk", () => {
   it("rejects unknown kinds and non-objects", () => {
     expect(isExtMessage({ kind: "nope" })).toBe(false);

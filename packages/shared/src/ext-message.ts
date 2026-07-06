@@ -41,6 +41,11 @@ export type ExtMessage =
       readonly kind: "consoleState";
       readonly tabId: number;
       readonly accountId?: string;
+    }
+  | {
+      readonly kind: "updateSettings";
+      readonly idleLockMinutes?: number;
+      readonly totpMinRemainingSeconds?: number;
     };
 
 /** 拡張メッセージの種別 discriminant。 */
@@ -85,6 +90,13 @@ export function isExtMessage(value: unknown): value is ExtMessage {
       return (
         typeof message["tabId"] === "number" &&
         (!("accountId" in message) || typeof message["accountId"] === "string")
+      );
+    case "updateSettings":
+      return (
+        (!("idleLockMinutes" in message) ||
+          typeof message["idleLockMinutes"] === "number") &&
+        (!("totpMinRemainingSeconds" in message) ||
+          typeof message["totpMinRemainingSeconds"] === "number")
       );
     default:
       return false;
