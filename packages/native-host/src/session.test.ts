@@ -76,4 +76,42 @@ describe("SessionManager", () => {
 
     expect(session.settings()).toEqual({ idleLockMinutes: 20, totpMinRemainingSeconds: 5 });
   });
+
+  it("restores a fresh session and advances the timestamp across an unlock-lock-unlock cycle", () => {
+    // Given: a clock that yields a new timestamp on each observed use (unlock/touch).
+    const firstUnlockAt = new Date("2026-07-03T01:00:00.000Z");
+    const secondUnlockAt = new Date("2026-07-03T01:05:00.000Z");
+    let unlockIndex = 0;
+    const session = createSessionManager(() =>
+      unlockIndex++ === 0 ? firstUnlockAt : secondUnlockAt,
+    );
+
+    // When / Then: the first unlock stores its token and last-used timestamp.
+    session.unlock("token-1");
+    expect(session.currentSession()).toBe("token-1");
+    expect(session.status()).toEqual({ unlocked: true, lastUsedAt: "2026-07-03T01:00:00.000Z" });
+
+    // When / Then: locking clears the token without rewinding the last-used timestamp.
+    session.lock();
+    expect(session.currentSession()).toBeUndefined();
+    expect(session.status()).toEqual({ unlocked: false, lastUsedAt: "2026-07-03T01:00:00.000Z" });
+
+    // When / Then: a second unlock installs a brand-new token and advances the timestamp.
+    session.unlock("token-2");
+    expect(session.currentSession()).toBe("token-2");
+    expect(session.status()).toEqual({ unlocked: true, lastUsedAt: "2026-07-03T01:05:00.000Z" });
+  });
+
+  it("persists the latest valid settings across multiple configure calls", () => {
+    // Given: a session manager at default settings.
+    const session = createSessionManager();
+
+    // When: two valid configure calls arrive in sequence.
+    session.configure({ idleLockMinutes: 30, totpMinRemainingSeconds: 8 });
+    expect(session.settings()).toEqual({ idleLockMinutes: 30, totpMinRemainingSeconds: 8 });
+    session.configure({ idleLockMinutes: 5, totpMinRemainingSeconds: 10 });
+
+    // Then: the most recent configuration fully replaces the previous one.
+    expect(session.settings()).toEqual({ idleLockMinutes: 5, totpMinRemainingSeconds: 10 });
+  });
 });
