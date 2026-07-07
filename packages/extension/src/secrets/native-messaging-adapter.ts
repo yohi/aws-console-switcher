@@ -132,10 +132,5 @@ export class NativeMessagingAdapter {
     for (const resolve of pending) {
       resolve({ ok: false, error });
     }
-    this.pending.clear();
-    this.port = null;
-    for (const resolve of pending.values()) {
-      resolve({ ok: false, error });
-    }
   }
 }
