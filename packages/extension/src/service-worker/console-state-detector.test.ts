@@ -284,6 +284,38 @@ describe("correctSessionStates", () => {
     expect(byUuid.get("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")?.state).toBe("active");
     expect(byUuid.get("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")?.state).toBe("unknown");
   });
+
+  it("corrects sessions concurrently rather than sequentially (avoid cumulative round-trip latency)", async () => {
+    // 5件の SessionRecord（MAX_CONCURRENT_SESSIONS）を直列処理すると listAccounts/syncAccounts の
+    // 応答遷延が積算する。各 SessionRecord は相互依存がないため並列化できるはず（code review）。
+    // ガード: 実行中の executeScript 呼び出し数の最大並行数を計測し、直列（1件ずつ）ではありえない
+    // 2以上の同時実行を検出できないと失敗する（Promise.all 化の回帰ガード）。
+    const storage = createFakeStorage();
+    await saveSessionRecord(
+      storage,
+      makeSession({ uuid: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", tabId: 1 }),
+    );
+    await saveSessionRecord(
+      storage,
+      makeSession({ uuid: "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb", tabId: 2 }),
+    );
+    let inFlightCalls = 0;
+    let maxObservedConcurrency = 0;
+    const scripting = createFakeScripting(async () => {
+      inFlightCalls += 1;
+      maxObservedConcurrency = Math.max(maxObservedConcurrency, inFlightCalls);
+      // マイクロタスク境界を挟み、直列実行なら2件目の呼び出しが開始される前に
+      // 1件目がここへ到達済み（かつ未 resolve）にならないことを利用して検出する。
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      inFlightCalls -= 1;
+      return [{ result: { ready: true, accountId: "123456789012" } }];
+    });
+    const deps = createDeps({ storage, scripting });
+
+    await correctSessionStates(deps);
+
+    expect(maxObservedConcurrency).toBeGreaterThan(1);
+  });
 });
 
 describe("correctSessionFromReport (content-script push path, consoleState message)", () => {

@@ -192,9 +192,13 @@ export async function correctSessionStates(
   deps: ConsoleStateDetectorDeps,
 ): Promise<void> {
   const sessions = await loadSessionRecords(deps.storage);
-  for (const session of sessions) {
-    await correctSingleSession(deps, session);
-  }
+  // 各 SessionRecord の補正は相互に依存しない（異なる tabId を読み、異なる storage キー
+  // `session:{uuid}` にしか書かない）ため、並列実行で安全に listAccounts/syncAccounts の
+  // 応答遷延を押しとどめる（code review：直列 for...of だと tabs.get + executeScript の往復が
+  // セッション数分連続して積算する）。
+  await Promise.all(
+    sessions.map((session) => correctSingleSession(deps, session)),
+  );
 }
 
 /**
