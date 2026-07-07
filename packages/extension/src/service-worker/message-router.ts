@@ -18,12 +18,12 @@ import {
 import {
   type StorageArea,
   loadAccountMetaCache,
-loadExtensionSettings,
-loadFlowContext,
+  loadExtensionSettings,
+  loadFlowContext,
   removeFlowContext,
   saveAccountMetaCache,
-saveExtensionSettings,
-saveFlowContext,
+  saveExtensionSettings,
+  saveFlowContext,
 } from "./storage.js";
 import {
   type CredentialProvider,
