@@ -219,7 +219,10 @@ export function createSessionManager(deps: SessionManagerDeps): SessionManager {
         });
         return ok(undefined);
       } catch {
-        // tabs.update の reject = タブ閉鎖/無効。新規ログインへフォールバックする（C-3）。
+        // tabs.update の reject = タブ閉鎖/無効。stale な SessionRecord を残すと message-router.ts の
+        // startLogin が新規ログインフォールバック直後にこの古い（閉鎖済み）tabId を誤って返してしまうため、
+        // 新規ログインへのフォールバック前に削除しておく（C-3）。
+        await removeSessionRecord(deps.storage, uuid);
       }
     }
     return triggerNewLogin(uuid);

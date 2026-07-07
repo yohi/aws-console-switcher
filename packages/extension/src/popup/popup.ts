@@ -10,10 +10,10 @@
  * 秘匿境界（最重要）: マスターパスワードは入力欄から読み取り後ただちに欄をクリアし、
  * `unlock` メッセージ送信の同期呼び出し以外ではいかなる変数にも保持しない（4.1.1, design.md 秘匿境界）。
  *
- * MVP 上の簡略化:
- * - セッション状態の一次情報源（`SessionRecord`）を Popup へ返す経路は task 5.3 / 8.1 で
- *   実装するため、現時点では空配列で結合する（全アカウントが「未ログイン」表示になる）。
- *   結合・状態判定の純粋関数は将来のセッション供給に備えて実装・検証済み。
+ * MVP 上の簡略化（更新: task 5.3 / 8.1 で解消済み）:
+ * - セッション状態の一次情報源（`SessionRecord`）は SW の `listAccounts`/`syncAccounts` 応答の
+ *   `sessions` フィールドから取得する。`extractSessions`（`extractAccounts` と同じ境界ガード規約）で
+ *   健全なレコードのみを取り出してから `mergeAccountsWithSessions` へ実供給する（`EMPTY_SESSIONS` 決め打ちは撤去済み）。
  * - 待機中アカウントの追跡は Popup メモリ上の楽観的集合で行い（サーバ側フロー状態の
  *   正本ではない）、「サインイン」押下で待機扱いにして「キャンセル」を提示する。
  */
@@ -50,12 +50,6 @@ interface PopupElements {
   readonly banner: HTMLElement;
 }
 
-/**
- * セッション記録は現状 Popup へ供給されない（MVP 簡略化, task 5.3 / 8.1 で対応）。
- * 空配列で結合し、状態判定を保守的に「未ログイン」へ倒す。
- */
-const EMPTY_SESSIONS: readonly SessionRecord[] = [];
-
 /** 値が `PopupResponse` の形か判定する境界ガード（未知応答を弾く）。 */
 function isPopupResponse(value: unknown): value is PopupResponse {
   if (typeof value !== "object" || value === null) {
@@ -81,6 +75,60 @@ function extractAccounts(value: unknown): readonly AccountMeta[] {
     return [];
   }
   return accounts.filter(isAccountMeta);
+}
+
+/**
+ * 値が `SessionRecord` の形をしているか判定する境界ガード（`isAccountMeta` と同じ規約）。
+ * SW 側の session-manager.ts の意味論（`SessionState`）と一致させ、不正な state 値を除外する。
+ */
+function isSessionRecord(value: unknown): value is SessionRecord {
+  if (typeof value !== "object" || value === null) {
+    return false;
+  }
+  const record = value as Record<string, unknown>;
+  return (
+    typeof record["uuid"] === "string" &&
+    typeof record["accountId"] === "string" &&
+    typeof record["tabId"] === "number" &&
+    typeof record["signedInAt"] === "string" &&
+    typeof record["lastAccessedAt"] === "string" &&
+    (record["state"] === "active" ||
+      record["state"] === "stale" ||
+      record["state"] === "unknown")
+  );
+}
+
+/**
+ * `{ sessions: SessionRecord[] }` 形の応答値から健全な `SessionRecord` のみを取り出す
+ *（`extractAccounts` と同じ境界ガード規約）。listAccounts / syncAccounts 応答の `sessions`（task 5.3/8.1）を
+ * 対象とする。テスト可能にするため export する（popup.test.ts）。
+ */
+export function extractSessions(value: unknown): readonly SessionRecord[] {
+  if (typeof value !== "object" || value === null) {
+    return [];
+  }
+  const sessions = (value as Record<string, unknown>)["sessions"];
+  if (!Array.isArray(sessions)) {
+    return [];
+  }
+  return sessions.filter(isSessionRecord);
+}
+
+/**
+ * `startLogin` の成功応答値が既存セッションの前面化（`{ tabId }`）を表すかを判定する。
+ *
+ * message-router.ts の `startLogin` は `SessionManager.switchTo` 契約に従い、既存セッションを
+ * 前面化した場合のみ `{ tabId: number }` を含めて返し、新規ログインフローを開始した場合は
+ * `value: undefined` を返す（task 6.1）。この区別を Popup 側で判定し、前面化成功時には
+ * `inFlight`（待機中集合）へ追加しないようにする（既に前面化済みのアカウントを誤って「進行中」表示し、
+ * 実在しないフローへ cancelLogin を送信してしまう UI 不整合を避ける）。テスト可能にするため
+ * export する（popup.test.ts）。
+ */
+export function isExistingSessionForegrounded(value: unknown): boolean {
+  if (typeof value !== "object" || value === null) {
+    return false;
+  }
+  return typeof (value as Record<string, unknown>)["tabId"] === "number";
 }
 
 /** 状態ラベルを控えめなエンドユーザー向け日本語へ写像する（3.1「不確定」表示）。 */
@@ -165,6 +213,8 @@ function bootstrapPopup(doc: Document): void {
 
   // --- Popup ローカル状態 -------------------------------------------------
   let accounts: readonly AccountMeta[] = [];
+  // SW の listAccounts/syncAccounts 応答の `sessions` から extractSessions で抽出する（task 5.3/8.1）。
+  let sessions: readonly SessionRecord[] = [];
   let query = "";
   /** 楽観的な待機中集合（キャンセル提示用。サーバ側フロー状態の正本ではない）。 */
   const inFlight = new Set<string>();
@@ -266,7 +316,7 @@ function bootstrapPopup(doc: Document): void {
 
   function render(): void {
     const items = filterAccounts(
-      mergeAccountsWithSessions(accounts, EMPTY_SESSIONS),
+      mergeAccountsWithSessions(accounts, sessions),
       query,
     );
     els.list.replaceChildren();
@@ -296,6 +346,7 @@ function bootstrapPopup(doc: Document): void {
       return;
     }
     accounts = extractAccounts(response.value);
+    sessions = extractSessions(response.value);
     render();
   }
 
@@ -309,7 +360,11 @@ function bootstrapPopup(doc: Document): void {
       });
       return;
     }
-    inFlight.add(uuid);
+    // 既存セッションの前面化成功時（{ tabId }）は inFlight へ追加しない（既にログイン済みのアカウントを
+    // 誤って「進行中（キャンセル可）」表示し、実在しないフローへ cancelLogin を送信してしまう UI 不整合を避ける）。
+    if (!isExistingSessionForegrounded(response.value)) {
+      inFlight.add(uuid);
+    }
     render();
   }
 
@@ -343,9 +398,12 @@ function bootstrapPopup(doc: Document): void {
       showBanner(response.error);
       return;
     }
-    // アンロック応答はメタデータ再同期結果（accounts）を含む（message-router unlock）。
+    // アンロック応答はメタデータ再同期結果（accounts）を含む（message-router unlock）。unlock 応答自体には
+    // sessions フィールドは含まないが、extractSessions は安全に空配列を返す（design.md 8.1: 直後の
+    // listAccounts 呼び出し経路で correctSessionStates の補正が自然にかかる）。
     els.unlockSection.hidden = true;
     accounts = extractAccounts(response.value);
+    sessions = extractSessions(response.value);
     render();
   }
 
