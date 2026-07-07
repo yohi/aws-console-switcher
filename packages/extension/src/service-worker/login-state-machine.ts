@@ -90,7 +90,7 @@ export class LoginStateMachine {
         return this.handleAwaitingMfa(ctx, event);
       default: {
         const _exhaustive: never = ctx.step;
-        return { step: "failed", error: makeFlowError("host_disconnected", `Unexpected step: ${_exhaustive}`) };
+        return { step: "failed", error: makeFlowError("invalid_configuration", `Unexpected step: ${_exhaustive}`) };
       }
     }
   }
