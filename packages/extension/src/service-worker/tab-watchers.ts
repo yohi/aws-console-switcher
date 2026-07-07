@@ -14,6 +14,7 @@ import {
 } from "@acs/shared";
 import {
   type StorageArea,
+  loadAccountMetaCache,
   loadFlowContext,
   removeFlowContext,
   saveFlowContext,
@@ -133,8 +134,8 @@ export async function recordSession(
   ctx: FlowContext,
 ): Promise<void> {
   const now = new Date().toISOString();
-  const account = await storage.get(`account:${ctx.uuid}`);
-  const accountId = account[`account:${ctx.uuid}`] as string | undefined;
+  const cached = await loadAccountMetaCache(storage);
+  const accountId = cached.find((account) => account.uuid === ctx.uuid)?.accountId;
   const record: SessionRecord = {
     uuid: ctx.uuid,
     accountId: accountId ?? "unknown",
