@@ -134,6 +134,26 @@ describe("routeMessage", () => {
     });
   });
 
+  it("startLogin reads accounts from cache without hitting the provider when cache is non-empty (task 8.1 pattern reuse)", async () => {
+    const deps = createDeps();
+    const cached: AccountMeta = {
+      uuid: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+      accountId: "123456789012",
+      alias: "prod",
+      username: "admin",
+      mfaEnabled: true,
+    };
+    await saveAccountMetaCache(deps.storage, [cached]);
+
+    const response = await routeMessage(deps, {
+      kind: "startLogin",
+      uuid: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+    });
+
+    expect(response.ok).toBe(true);
+    expect(deps.credentialProvider.listAccounts).not.toHaveBeenCalled();
+  });
+
   it("returns accounts for listAccounts", async () => {
     const deps = createDeps();
     const response = await routeMessage(deps, { kind: "listAccounts" });

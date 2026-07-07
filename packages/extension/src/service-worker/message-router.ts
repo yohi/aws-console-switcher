@@ -11,6 +11,7 @@ import {
   type FlowContext,
   type FlowError,
   type HostRequest,
+  type Result,
   type SigninDomEvent,
   isExtMessage,
   makeFlowError,
@@ -126,17 +127,18 @@ export async function routeMessage(
 }
 
 /**
- * アカウント一覧を返す（task 8.1, requirements 3.4/3.1）。
+ * cache-then-fallback でアカウント一覧を取得する共通ヘルパー（listAccounts / startLogin で共有）。
  *
- * cache-then-fallback: まず `chrome.storage.local` の非秘匿メタデータキャッシュを読み、
- * 非空ならホスト往復なしで Popup へ返す（ライブ往復を毎回行わない）。
+ * まず `chrome.storage.local` の非秘匿メタデータキャッシュを読み、非空ならホスト往復なしに返す。
  * キャッシュが空（同期前の初回起動等）の場合のみホストから新規取得し、
  * 以降の呼び出しがキャッシュから読めるよう取得結果を保存してから返す。
  */
-async function listAccounts(deps: MessageRouterDeps): Promise<RouterResponse> {
+async function loadAccountsCacheThenFallback(
+  deps: MessageRouterDeps,
+): Promise<Result<readonly AccountMeta[], FlowError>> {
   const cached = await loadAccountMetaCache(deps.storage);
   if (cached.length > 0) {
-    return { ok: true, value: { accounts: cached } };
+    return { ok: true, value: cached };
   }
   const result = await deps.credentialProvider.listAccounts();
   if (!result.ok) {
@@ -144,6 +146,19 @@ async function listAccounts(deps: MessageRouterDeps): Promise<RouterResponse> {
   }
   // 初回フォールバック取得結果をキャッシュし、次回以降はキャッシュから読む。
   await saveAccountMetaCache(deps.storage, result.value);
+  return { ok: true, value: result.value };
+}
+
+/**
+ * アカウント一覧を返す（task 8.1, requirements 3.4/3.1）。
+ *
+ * cache-then-fallback（loadAccountsCacheThenFallback）を介して取得する。
+ */
+async function listAccounts(deps: MessageRouterDeps): Promise<RouterResponse> {
+  const result = await loadAccountsCacheThenFallback(deps);
+  if (!result.ok) {
+    return result;
+  }
   return { ok: true, value: { accounts: result.value } };
 }
 
@@ -151,7 +166,8 @@ async function startLogin(
   deps: MessageRouterDeps,
   uuid: string,
 ): Promise<RouterResponse> {
-  const accounts = await deps.credentialProvider.listAccounts();
+  // startLogin も listAccounts と同じ cache-then-fallback 経路を共有し、毎回のシリンフーレス取得（ホスト往復）を避ける。
+  const accounts = await loadAccountsCacheThenFallback(deps);
   if (!accounts.ok) {
     return accounts;
   }
@@ -342,7 +358,7 @@ async function handleSigninDomEvent(
   message: Extract<ExtMessage, { kind: "signinDomEvent" }>,
 ): Promise<RouterResponse> {
   const ctx = await loadFlowContext(deps.storage, message.tabId);
-  if (!ctx || ctx.uuid !== message.uuid) {
+  if (ctx?.uuid !== message.uuid) {
     return { ok: true, value: undefined };
   }
 
@@ -379,7 +395,7 @@ async function handleSigninDomEvent(
   // 新ステップを永続化し、状態依存の監視窓でアラームを (再)登録する（design.md 2.2）。
   const updated: FlowContext = {
     ...ctx,
-    ...(action.ctx ?? {}),
+    ...action.ctx,
     step: action.step,
   };
   await saveFlowContext(deps.storage, updated);
