@@ -285,8 +285,10 @@ describe("handleInjectionCommand", () => {
     );
   });
 
-  it("returns false when the target field is missing", () => {
+  it("returns false and does not submit when the target field is missing (accountId)", () => {
     const doc = makeContainer(SUBMIT_HTML);
+    const clicked = vi.fn();
+    doc.querySelector("#signin_button")?.addEventListener("click", clicked);
     const command: SigninInjectionCommand = {
       kind: "injectAccountId",
       accountId: "123456789012",
@@ -294,6 +296,36 @@ describe("handleInjectionCommand", () => {
     expect(handleInjectionCommand(doc, DEFAULT_SELECTOR_SET, command)).toBe(
       false,
     );
+    expect(clicked).not.toHaveBeenCalled();
+  });
+
+  it("returns false and does not submit when the password field is missing (injectCredentials)", () => {
+    const doc = makeContainer('<input id="username" />' + SUBMIT_HTML);
+    const clicked = vi.fn();
+    doc.querySelector("#signin_button")?.addEventListener("click", clicked);
+    const command: SigninInjectionCommand = {
+      kind: "injectCredentials",
+      username: "iam-user",
+      password: "s3cret",
+    };
+    expect(handleInjectionCommand(doc, DEFAULT_SELECTOR_SET, command)).toBe(
+      false,
+    );
+    expect(clicked).not.toHaveBeenCalled();
+  });
+
+  it("returns false and does not submit when the target field is missing (injectTotp)", () => {
+    const doc = makeContainer(SUBMIT_HTML);
+    const clicked = vi.fn();
+    doc.querySelector("#signin_button")?.addEventListener("click", clicked);
+    const command: SigninInjectionCommand = {
+      kind: "injectTotp",
+      code: "000111",
+    };
+    expect(handleInjectionCommand(doc, DEFAULT_SELECTOR_SET, command)).toBe(
+      false,
+    );
+    expect(clicked).not.toHaveBeenCalled();
   });
 });
 

@@ -256,9 +256,10 @@ export function sendSigninDomEvent(
 // --- 7. 注入コマンド処理（SW → CS 受信ハンドラの本体, 純粋） ---
 
 /**
- * SW からの `SigninInjectionCommand` を該当検出器＋注入器へ振り分け、注入後に送信する
- * （design.md「アカウント ID／認証情報／TOTP を注入して送信する」）。
- * 送信ボタンは best-effort（見つからなければ送信しない）で、返り値は **注入の成否**を表す。
+ * SW からの `SigninInjectionCommand` を該当検出器＋注入器へ振り分け、注入に成功した場合のみ
+ * 送信ボタンをクリックする（design.md「アカウント ID／認証情報／TOTP を注入して送信する」）。
+ * 送信は「注入成功」を前提とする best-effort（注入失敗時・送信ボタン未検出時は送信しない）で、
+ * 返り値も **注入の成否**を表す（送信結果とは独立）。
  * @returns 対象フィールドへの値注入がすべて成功したか。
  */
 export function handleInjectionCommand(
@@ -272,22 +273,29 @@ export function handleInjectionCommand(
         detectAccountIdField(doc, selectors),
         command.accountId,
       );
-      submitForm(detectSubmitButton(doc, selectors));
+      if (injected) {
+        submitForm(detectSubmitButton(doc, selectors));
+      }
       return injected;
     }
     case "injectCredentials": {
       const fields = detectCredentialFields(doc, selectors);
       const usernameInjected = injectValue(fields.username, command.username);
       const passwordInjected = injectValue(fields.password, command.password);
-      submitForm(detectSubmitButton(doc, selectors));
-      return usernameInjected && passwordInjected;
+      const injected = usernameInjected && passwordInjected;
+      if (injected) {
+        submitForm(detectSubmitButton(doc, selectors));
+      }
+      return injected;
     }
     case "injectTotp": {
       const injected = injectValue(
         detectMfaField(doc, selectors),
         command.code,
       );
-      submitForm(detectSubmitButton(doc, selectors));
+      if (injected) {
+        submitForm(detectSubmitButton(doc, selectors));
+      }
       return injected;
     }
     default: {
