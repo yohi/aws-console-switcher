@@ -90,6 +90,19 @@ export interface ConsoleStateDetectorDeps {
  * `console-state-detector.test.ts` のパリティ検証テストで担保する）。
  * 型（`SelectorSet` / `ConsoleDetectionResult`）は型のみの参照であり、コンパイル後に消去されるため
  * ランタイムの自己完結性を損なわない。
+ *
+ * IMPORTANT（バンドラー変換への耐性）: 上記の自己完結性は `packages/extension/vite.config.ts` の
+ * `build.target`（現在 `"esnext"`）に依存する。`packages/extension/tsconfig.json` は
+ * `noEmit: true`（tsc は型チェックのみで JS を一切出力しない）なので、実際に本関数を注入する JS を
+ * 生成するのは Vite/esbuild のみであり、tsconfig の `target` は本件と無関係である。`"esnext"` の
+ * 通り構文の下位変換（downleveling）が一切発生しないうちは、本関数のソースはほぼそのままバンドルされ
+ * 自己完結性を損なわない。ただし将来 `vite.config.ts` の `target` を `es2017` 等へ下げた場合、
+ * esbuild が `async`・spread 演算子・generator 等をダウンレベルする際にモジュールスコープへ共有ヘルパー
+ * （`__async` / `__spreadValues` 等）を注入することがあり、本関数がそれらを参照すると自己完結性が壊れる
+ * リスクがある（現在のコードが意図的に for...of / Optional Chaining のみを用い async/spread/generator
+ * を避けているのもこのためである）。回帰検出は `console-state-detector.test.ts` の自己完結性ガードテスト
+ * （`injectableDetectConsoleState.toString()` に `__` 始まりの共有ヘルパー呼び出しが含まれないことを
+ * 検証する）で行う。
  */
 export function injectableDetectConsoleState(
   selectors: SelectorSet,
