@@ -99,7 +99,7 @@ function stateText(state: SessionStateLabel): string {
   }
 }
 
-/** 必須 DOM 要素を型安全に解決する。1 つでも欠ければ `null`。 */
+/** 必須 DOM 要素を型安全に解決する。1 つでも欠ければ `null`（欠落要素名は console.error で報告する）。 */
 function queryElements(doc: Document): PopupElements | null {
   const search = doc.getElementById("search");
   const list = doc.getElementById("account-list");
@@ -130,6 +130,24 @@ function queryElements(doc: Document): PopupElements | null {
       banner,
     };
   }
+  const missing = Object.entries({
+    search,
+    list,
+    syncBtn,
+    lockBtn,
+    unlockForm,
+    unlockSection,
+    password,
+    banner,
+  })
+    .filter(([, el]) => el === null)
+    .map(([name]) => name);
+  console.error(
+    `Popup の必須 DOM 要素を解決できませんでした（popup.html の構造変更を確認してください）。` +
+      (missing.length > 0
+        ? `欠落した要素: ${missing.join(", ")}`
+        : "要素は存在するが期待する型と一致しません。"),
+  );
   return null;
 }
 
@@ -298,11 +316,12 @@ function bootstrapPopup(doc: Document): void {
   async function onCancel(uuid: string): Promise<void> {
     clearBanner();
     const response = await send({ kind: "cancelLogin", uuid });
-    inFlight.delete(uuid);
-    render();
     if (!response.ok) {
       showBanner(response.error);
+      return;
     }
+    inFlight.delete(uuid);
+    render();
   }
 
   async function onRetry(uuid: string): Promise<void> {
