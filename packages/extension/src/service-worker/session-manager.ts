@@ -23,6 +23,7 @@ import {
   type FlowError,
   type Result,
   type SessionRecord,
+  makeFlowError,
   ok,
 } from "@acs/shared";
 import {
@@ -170,11 +171,24 @@ export function createSessionManager(deps: SessionManagerDeps): SessionManager {
    * 追加のトリガーであるため、追加トリガーごと直列化しなければ並行呼び出しが上限判定を素通りして
    * 一時的に上限を超過しうる（design.md「並行 switchTo の排他制御」）。
    */
-  async function triggerNewLogin(uuid: string): Promise<void> {
-    await runSerialized(async () => {
-      await evictOldestIfAtCap();
-      await deps.onNewLoginRequired(uuid);
-    });
+  async function triggerNewLogin(uuid: string): Promise<Result<void, FlowError>> {
+    try {
+      await runSerialized(async () => {
+        await evictOldestIfAtCap();
+        await deps.onNewLoginRequired(uuid);
+      });
+      return ok(undefined);
+    } catch (error) {
+      // switchTo の Result 契約（reject しない）を守るため、onNewLoginRequired 由来の例外を
+      // FlowError へ変換して返す（runSerialized 自体は fn() の reject をそのまま伝播するため）。
+      return {
+        ok: false,
+        error: makeFlowError(
+          "invalid_configuration",
+          `Failed to start a new login flow: ${error instanceof Error ? error.message : String(error)}`,
+        ),
+      };
+    }
   }
 
   /**
@@ -193,7 +207,11 @@ export function createSessionManager(deps: SessionManagerDeps): SessionManager {
         const updated = await deps.tabs.update(record.tabId, { active: true });
         const windowId = updated?.windowId;
         if (windowId !== undefined) {
-          await deps.windows.update(windowId, { focused: true });
+          try {
+            await deps.windows.update(windowId, { focused: true });
+          } catch {
+            // windows.update の失敗はタブの有効性と無関係の best-effort。前面化自体は続行する。
+          }
         }
         await saveSessionRecord(deps.storage, {
           ...record,
@@ -204,8 +222,7 @@ export function createSessionManager(deps: SessionManagerDeps): SessionManager {
         // tabs.update の reject = タブ閉鎖/無効。新規ログインへフォールバックする（C-3）。
       }
     }
-    await triggerNewLogin(uuid);
-    return ok(undefined);
+    return triggerNewLogin(uuid);
   }
 
   async function evictIfNeeded(): Promise<void> {

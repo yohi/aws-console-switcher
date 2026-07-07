@@ -143,13 +143,19 @@ interface FakeWindows {
   readonly updateCalls: Array<{ windowId: number; props: { focused?: boolean } }>;
 }
 
-function createFakeWindows(): FakeWindows {
+function createFakeWindows(
+  updateImpl?: (
+    windowId: number,
+    props: { focused?: boolean },
+  ) => Promise<unknown>,
+): FakeWindows {
   const updateCalls: Array<{ windowId: number; props: { focused?: boolean } }> =
     [];
+  const impl = updateImpl ?? (async () => undefined);
   const windows: SessionWindowsApi = {
     update: async (windowId, props) => {
       updateCalls.push({ windowId, props });
-      return undefined;
+      return impl(windowId, props);
     },
   };
   return { windows, updateCalls };
@@ -207,6 +213,56 @@ describe("SessionManager.switchTo（前面化, task 6.1）", () => {
     expect(result.ok).toBe(true);
     expect(newLoginCalls).toEqual(["a"]);
     expect(windowsUpdateCalls).toEqual([]);
+  });
+
+  it("windows.update が失敗してもタブは有効なので前面化を継続する", async () => {
+    const { storage } = createFakeStorage();
+    await saveSessionRecord(storage, makeSession("a", 10, ANCIENT));
+    const { tabs, updateCalls } = createFakeTabs();
+    const { windows } = createFakeWindows(async () => {
+      throw new Error("No window with id: 100.");
+    });
+    const newLoginCalls: string[] = [];
+    const deps: SessionManagerDeps = {
+      storage,
+      tabs,
+      windows,
+      onNewLoginRequired: (uuid) => {
+        newLoginCalls.push(uuid);
+      },
+    };
+    const manager = createSessionManager(deps);
+
+    const result = await manager.switchTo("a");
+
+    expect(result.ok).toBe(true);
+    expect(updateCalls).toEqual([{ tabId: 10, props: { active: true } }]);
+    expect(newLoginCalls).toEqual([]);
+    const [stored] = await loadSessionRecords(storage);
+    expect(stored !== undefined && stored.lastAccessedAt > ANCIENT).toBe(true);
+  });
+
+  it("onNewLoginRequired が例外を投げても switchTo は reject せずエラー Result を返す", async () => {
+    const { storage } = createFakeStorage();
+    const { tabs } = createFakeTabs();
+    const { windows } = createFakeWindows();
+    const deps: SessionManagerDeps = {
+      storage,
+      tabs,
+      windows,
+      onNewLoginRequired: () => {
+        throw new Error("failed to open sign-in tab");
+      },
+    };
+    const manager = createSessionManager(deps);
+
+    const result = await manager.switchTo("missing");
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe("invalid_configuration");
+      expect(result.error.message).toContain("failed to open sign-in tab");
+    }
   });
 
   it("対象 UUID のセッションが存在しない場合は新規ログインへフォールバックする", async () => {
