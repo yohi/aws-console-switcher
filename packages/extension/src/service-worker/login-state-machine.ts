@@ -140,6 +140,9 @@ export class LoginStateMachine {
       // 既にアカウント ID が Cookie 記憶済みの場合
       return this.injectCredentials(ctx);
     }
+    if (event.event === "consoleRedirect") {
+      return { step: "done" };
+    }
     if (event.event === "authError" || event.event === "domTimeout") {
       return { step: "failed", error: makeFlowError("bad_password", "Failed to submit account ID.") };
     }

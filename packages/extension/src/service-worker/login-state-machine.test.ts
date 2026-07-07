@@ -431,6 +431,19 @@ describe("LoginStateMachine", () => {
     expect(messenger.injectCredentials).toHaveBeenCalledWith(1, "admin", "secret");
   });
 
+  it("returns done on consoleRedirect while awaiting_account_id (Cookie-remembered, skipped credentials)", async () => {
+    const machine = new LoginStateMachine(
+      createFakeProvider(),
+      createFakeMessenger(),
+      createFakeStorage(),
+    );
+
+    const result = await machine.handleEvent(makeCtx("awaiting_account_id"), {
+      event: "consoleRedirect",
+    });
+    expect(result.step).toBe("done");
+  });
+
   it("fails with bad_password on authError while awaiting_account_id", async () => {
     const machine = new LoginStateMachine(
       createFakeProvider(),
