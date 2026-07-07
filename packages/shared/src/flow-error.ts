@@ -17,6 +17,7 @@ export type FailureCategory = (typeof FAILURE_CATEGORIES)[number];
 export const FLOW_ERROR_CODES = [
   "host_not_running",
   "host_disconnected",
+  "host_malformed_response",
   "bw_not_logged_in",
   "vault_locked",
   "item_not_found",
@@ -54,6 +55,7 @@ export interface FlowError {
 const CODE_TO_CATEGORY: Record<FlowErrorCode, FailureCategory> = {
   host_not_running: "precondition",
   host_disconnected: "precondition",
+  host_malformed_response: "precondition",
   bw_not_logged_in: "precondition",
   vault_locked: "precondition",
   item_not_found: "precondition",
@@ -75,6 +77,7 @@ const CODE_TO_CATEGORY: Record<FlowErrorCode, FailureCategory> = {
 const DEFAULT_RETRIABLE: Record<FlowErrorCode, boolean> = {
   host_not_running: false,
   host_disconnected: false,
+  host_malformed_response: false,
   bw_not_logged_in: false,
   vault_locked: false,
   item_not_found: false,
