@@ -114,6 +114,23 @@ export function extractSessions(value: unknown): readonly SessionRecord[] {
   return sessions.filter(isSessionRecord);
 }
 
+/**
+ * `startLogin` の成功応答値が既存セッションの前面化（`{ tabId }`）を表すかを判定する。
+ *
+ * message-router.ts の `startLogin` は `SessionManager.switchTo` 契約に従い、既存セッションを
+ * 前面化した場合のみ `{ tabId: number }` を含めて返し、新規ログインフローを開始した場合は
+ * `value: undefined` を返す（task 6.1）。この区別を Popup 側で判定し、前面化成功時には
+ * `inFlight`（待機中集合）へ追加しないようにする（既に前面化済みのアカウントを誤って「進行中」表示し、
+ * 実在しないフローへ cancelLogin を送信してしまう UI 不整合を避ける）。テスト可能にするため
+ * export する（popup.test.ts）。
+ */
+export function isExistingSessionForegrounded(value: unknown): boolean {
+  if (typeof value !== "object" || value === null) {
+    return false;
+  }
+  return typeof (value as Record<string, unknown>)["tabId"] === "number";
+}
+
 /** 状態ラベルを控えめなエンドユーザー向け日本語へ写像する（3.1「不確定」表示）。 */
 function stateText(state: SessionStateLabel): string {
   switch (state) {
@@ -343,7 +360,11 @@ function bootstrapPopup(doc: Document): void {
       });
       return;
     }
-    inFlight.add(uuid);
+    // 既存セッションの前面化成功時（{ tabId }）は inFlight へ追加しない（既にログイン済みのアカウントを
+    // 誤って「進行中（キャンセル可）」表示し、実在しないフローへ cancelLogin を送信してしまう UI 不整合を避ける）。
+    if (!isExistingSessionForegrounded(response.value)) {
+      inFlight.add(uuid);
+    }
     render();
   }
 

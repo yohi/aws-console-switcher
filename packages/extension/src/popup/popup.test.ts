@@ -9,7 +9,7 @@
 import { describe, expect, it } from "vitest";
 import type { AccountMeta, SessionRecord } from "@acs/shared";
 import { mergeAccountsWithSessions } from "./account-list.js";
-import { extractSessions } from "./popup.js";
+import { extractSessions, isExistingSessionForegrounded } from "./popup.js";
 
 function session(overrides: Partial<SessionRecord> & { uuid: string }): SessionRecord {
   return {
@@ -94,5 +94,25 @@ describe("extractSessions -> mergeAccountsWithSessions (real supply, task 5.3/8.
 
     expect(items).toHaveLength(1);
     expect(items[0]?.session).toBeUndefined();
+  });
+});
+
+describe("isExistingSessionForegrounded", () => {
+  it("returns true when startLogin resolved by foregrounding an existing session ({ tabId })", () => {
+    // message-router.ts の startLogin は、SessionManager.switchTo が既存セッションを前面化した場合
+    // のみ `{ tabId }` を含めて返す（task 6.1）。
+    expect(isExistingSessionForegrounded({ tabId: 77 })).toBe(true);
+  });
+
+  it("returns false when startLogin started a brand-new login flow (value: undefined)", () => {
+    // 新規ログインフロー開始時は value: undefined を返すので inFlight へ追加すべきと判断できる。
+    expect(isExistingSessionForegrounded(undefined)).toBe(false);
+  });
+
+  it("returns false for malformed/unexpected shapes (defensive boundary guard)", () => {
+    expect(isExistingSessionForegrounded(null)).toBe(false);
+    expect(isExistingSessionForegrounded("not-an-object")).toBe(false);
+    expect(isExistingSessionForegrounded({ tabId: "77" })).toBe(false);
+    expect(isExistingSessionForegrounded({})).toBe(false);
   });
 });
