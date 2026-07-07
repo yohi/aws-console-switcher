@@ -60,7 +60,7 @@ export class BitwardenCredentialProvider implements CredentialProvider {
       return {
         ok: false,
         error: makeFlowError(
-          "host_disconnected",
+          "host_malformed_response",
           "Expected folders response from native host.",
         ),
       };
@@ -89,7 +89,7 @@ export class BitwardenCredentialProvider implements CredentialProvider {
       return {
         ok: false,
         error: makeFlowError(
-          "host_disconnected",
+          "host_malformed_response",
           "Expected items response from native host.",
         ),
       };
@@ -100,7 +100,7 @@ export class BitwardenCredentialProvider implements CredentialProvider {
       return {
         ok: false,
         error: makeFlowError(
-          "host_disconnected",
+          "host_malformed_response",
           "Native host returned malformed account metadata.",
         ),
       };
@@ -121,7 +121,7 @@ export class BitwardenCredentialProvider implements CredentialProvider {
       return {
         ok: false,
         error: makeFlowError(
-          "host_disconnected",
+          "host_malformed_response",
           "Expected item response from native host.",
         ),
       };
@@ -147,7 +147,7 @@ export class BitwardenCredentialProvider implements CredentialProvider {
       return {
         ok: false,
         error: makeFlowError(
-          "host_disconnected",
+          "host_malformed_response",
           "Expected TOTP response from native host.",
         ),
       };
