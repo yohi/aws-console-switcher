@@ -98,88 +98,29 @@ describe("classifyAndHandleSecretFetchError (task 8.2, requirements 3.4, S-3)", 
     expect(await loadAccountMetaCache(storage)).toEqual([accountB]);
   });
 
-  it("keeps the cache untouched and returns the original error on vault_locked", async () => {
-    const { storage, setSpy } = createSpyStorage();
-    await saveAccountMetaCache(storage, [accountA, accountB]);
-    setSpy.mockClear();
+  it.each([
+    ["vault_locked", "vault is locked"],
+    ["bad_password", "aws rejected credentials"],
+    ["bw_not_logged_in", "bw is not logged in"],
+    ["host_not_running", "native host is not running"],
+    ["host_disconnected", "native host port closed"],
+  ] as const)(
+    "keeps the cache untouched and returns the original error on %s",
+    async (code, message) => {
+      const { storage, setSpy } = createSpyStorage();
+      await saveAccountMetaCache(storage, [accountA, accountB]);
+      setSpy.mockClear();
 
-    const original = makeFlowError("vault_locked", "vault is locked");
-    const result = await classifyAndHandleSecretFetchError(
-      storage,
-      accountA.uuid,
-      original,
-    );
+      const original = makeFlowError(code, message);
+      const result = await classifyAndHandleSecretFetchError(
+        storage,
+        accountA.uuid,
+        original,
+      );
 
-    expect(result).toBe(original);
-    expect(setSpy).not.toHaveBeenCalled();
-    expect(await loadAccountMetaCache(storage)).toEqual([accountA, accountB]);
-  });
-
-  it("keeps the cache untouched on bad_password (aws_auth, non-transient, non-missing)", async () => {
-    const { storage, setSpy } = createSpyStorage();
-    await saveAccountMetaCache(storage, [accountA, accountB]);
-    setSpy.mockClear();
-
-    const original = makeFlowError("bad_password", "aws rejected credentials");
-    const result = await classifyAndHandleSecretFetchError(
-      storage,
-      accountA.uuid,
-      original,
-    );
-
-    expect(result).toBe(original);
-    expect(setSpy).not.toHaveBeenCalled();
-    expect(await loadAccountMetaCache(storage)).toEqual([accountA, accountB]);
-  });
-
-  it("keeps the cache untouched and returns the original error on bw_not_logged_in (transient precondition)", async () => {
-    const { storage, setSpy } = createSpyStorage();
-    await saveAccountMetaCache(storage, [accountA, accountB]);
-    setSpy.mockClear();
-
-    const original = makeFlowError("bw_not_logged_in", "bw is not logged in");
-    const result = await classifyAndHandleSecretFetchError(
-      storage,
-      accountA.uuid,
-      original,
-    );
-
-    expect(result).toBe(original);
-    expect(setSpy).not.toHaveBeenCalled();
-    expect(await loadAccountMetaCache(storage)).toEqual([accountA, accountB]);
-  });
-
-  it("keeps the cache untouched and returns the original error on host_not_running (transient precondition)", async () => {
-    const { storage, setSpy } = createSpyStorage();
-    await saveAccountMetaCache(storage, [accountA, accountB]);
-    setSpy.mockClear();
-
-    const original = makeFlowError("host_not_running", "native host is not running");
-    const result = await classifyAndHandleSecretFetchError(
-      storage,
-      accountA.uuid,
-      original,
-    );
-
-    expect(result).toBe(original);
-    expect(setSpy).not.toHaveBeenCalled();
-    expect(await loadAccountMetaCache(storage)).toEqual([accountA, accountB]);
-  });
-
-  it("keeps the cache untouched and returns the original error on host_disconnected (transient precondition)", async () => {
-    const { storage, setSpy } = createSpyStorage();
-    await saveAccountMetaCache(storage, [accountA, accountB]);
-    setSpy.mockClear();
-
-    const original = makeFlowError("host_disconnected", "native host port closed");
-    const result = await classifyAndHandleSecretFetchError(
-      storage,
-      accountA.uuid,
-      original,
-    );
-
-    expect(result).toBe(original);
-    expect(setSpy).not.toHaveBeenCalled();
-    expect(await loadAccountMetaCache(storage)).toEqual([accountA, accountB]);
-  });
+      expect(result).toBe(original);
+      expect(setSpy).not.toHaveBeenCalled();
+      expect(await loadAccountMetaCache(storage)).toEqual([accountA, accountB]);
+    },
+  );
 });
