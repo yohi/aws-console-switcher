@@ -12,7 +12,10 @@ permissions:
 
 jobs:
   release-please:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-slim
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
     steps:
       - name: Create release PR or GitHub Release
         id: release
@@ -21,41 +24,38 @@ jobs:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
 
+  build-release-artifacts:
+    runs-on: ubuntu-24.04
+    needs: release-please
+    if: ${{ needs.release-please.outputs.release_created == 'true' }}
+    steps:
       - name: Checkout release tag
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
-        if: ${{ steps.release.outputs.release_created }}
         with:
-          ref: ${{ steps.release.outputs.tag_name }}
+          ref: ${{ needs.release-please.outputs.tag_name }}
 
       - name: Set up Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
-        if: ${{ steps.release.outputs.release_created }}
         with:
           node-version: 20.19.0
           cache: npm
 
       - name: Use npm 11
-        if: ${{ steps.release.outputs.release_created }}
-        run: npm install --global npm@11
+        run: npm install --global npm@11.4.2
 
       - name: Install dependencies
-        if: ${{ steps.release.outputs.release_created }}
         run: npm ci
 
       - name: Type-check workspaces
-        if: ${{ steps.release.outputs.release_created }}
         run: npm run typecheck
 
       - name: Run tests
-        if: ${{ steps.release.outputs.release_created }}
         run: npm test
 
       - name: Build extension
-        if: ${{ steps.release.outputs.release_created }}
         run: npm run build
 
       - name: Package extension zip
-        if: ${{ steps.release.outputs.release_created }}
         id: package
         shell: bash
         run: |
@@ -86,10 +86,9 @@ jobs:
           echo "package_name=${package_name}" >> "${GITHUB_OUTPUT}"
           echo "package_path=${package_path}" >> "${GITHUB_OUTPUT}"
         env:
-          RELEASE_TAG: ${{ steps.release.outputs.tag_name }}
+          RELEASE_TAG: ${{ needs.release-please.outputs.tag_name }}
 
       - name: Upload packaged extension
-        if: ${{ steps.release.outputs.release_created }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: ${{ steps.package.outputs.package_name }}
@@ -98,9 +97,8 @@ jobs:
           retention-days: 30
 
       - name: Upload packaged extension to GitHub Release
-        if: ${{ steps.release.outputs.release_created }}
         run: gh release upload "${RELEASE_TAG}" "${PACKAGE_PATH}" --clobber
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          RELEASE_TAG: ${{ steps.release.outputs.tag_name }}
+          RELEASE_TAG: ${{ needs.release-please.outputs.tag_name }}
           PACKAGE_PATH: ${{ steps.package.outputs.package_path }}
