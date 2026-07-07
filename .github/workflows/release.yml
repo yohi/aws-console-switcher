@@ -1,0 +1,105 @@
+name: release-please
+
+on:
+  push:
+    branches:
+      - master
+  workflow_dispatch:
+
+jobs:
+  release-please:
+    runs-on: ubuntu-slim
+    permissions:
+      contents: write
+      pull-requests: write
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
+    steps:
+      - name: Create release PR or GitHub Release
+        id: release
+        uses: googleapis/release-please-action@c3fc4de07084f75a2b61a5b933069bda6edf3d5c
+        with:
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+  build-release-artifacts:
+    runs-on: ubuntu-24.04
+    needs: release-please
+    if: ${{ needs.release-please.outputs.release_created == 'true' }}
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout release tag
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          ref: ${{ needs.release-please.outputs.tag_name }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 20.19.0
+          cache: npm
+
+      - name: Use npm 11
+        run: npm install --global npm@11.4.2
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type-check workspaces
+        run: npm run typecheck
+
+      - name: Run tests
+        run: npm test
+
+      - name: Build extension
+        run: npm run build
+
+      - name: Package extension zip
+        id: package
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          package_name="aws-console-switcher-${RELEASE_TAG}.zip"
+          package_path="artifacts/${package_name}"
+          export PACKAGE_PATH="${package_path}"
+
+          mkdir -p artifacts
+          python - <<'PY'
+          import os
+          import zipfile
+          from pathlib import Path
+
+          source = Path("packages/extension/dist")
+          target = Path(os.environ["PACKAGE_PATH"])
+
+          if not source.is_dir():
+              raise SystemExit(f"Extension build output is missing: {source}")
+
+          with zipfile.ZipFile(target, "w", zipfile.ZIP_DEFLATED) as archive:
+              for path in sorted(source.rglob("*")):
+                  if path.is_file():
+                      archive.write(path, path.relative_to(source).as_posix())
+          PY
+
+          echo "package_name=${package_name}" >> "${GITHUB_OUTPUT}"
+          echo "package_path=${package_path}" >> "${GITHUB_OUTPUT}"
+        env:
+          RELEASE_TAG: ${{ needs.release-please.outputs.tag_name }}
+
+      - name: Upload packaged extension
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: ${{ steps.package.outputs.package_name }}
+          path: ${{ steps.package.outputs.package_path }}
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload packaged extension to GitHub Release
+        run: gh release upload "${RELEASE_TAG}" "${PACKAGE_PATH}" --clobber
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ needs.release-please.outputs.tag_name }}
+          PACKAGE_PATH: ${{ steps.package.outputs.package_path }}

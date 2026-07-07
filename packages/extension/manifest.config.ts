@@ -41,7 +41,7 @@ export default defineManifest((env) => {
   return {
     manifest_version: 3,
     name: "AWS Console Switcher",
-    version: "0.1.0",
+    version: "0.1.0", // x-release-please-version
     description:
       "Switch between multiple AWS IAM console accounts, using a Bitwarden Vault as the credential SSOT via a Native Messaging host.",
     // 開発時の unpacked 拡張 ID を固定するための key（未設定なら Web Store 固定 ID を用いる）。
