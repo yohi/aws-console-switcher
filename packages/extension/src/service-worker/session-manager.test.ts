@@ -215,6 +215,30 @@ describe("SessionManager.switchTo（前面化, task 6.1）", () => {
     expect(windowsUpdateCalls).toEqual([]);
   });
 
+  it("タブ閉鎖（tabs.update reject）時は新規ログインフォールバック前に stale な SessionRecord を削除する（message-router.ts の startLogin が古い tabId を誤返ししないようにする）", async () => {
+    const { storage } = createFakeStorage();
+    await saveSessionRecord(storage, makeSession("a", 10, ANCIENT));
+    const { tabs } = createFakeTabs(async () => {
+      throw new Error("No tab with id: 10.");
+    });
+    const { windows } = createFakeWindows();
+    const deps: SessionManagerDeps = {
+      storage,
+      tabs,
+      windows,
+      onNewLoginRequired: () => {
+        // 新規ログインは本テストの関心外（recordSession は done 遷移時に別経路で実行される）。
+      },
+    };
+    const manager = createSessionManager(deps);
+
+    const result = await manager.switchTo("a");
+
+    expect(result.ok).toBe(true);
+    const sessions = await loadSessionRecords(storage);
+    expect(sessions.find((s) => s.uuid === "a")).toBeUndefined();
+  });
+
   it("windows.update が失敗してもタブは有効なので前面化を継続する", async () => {
     const { storage } = createFakeStorage();
     await saveSessionRecord(storage, makeSession("a", 10, ANCIENT));
