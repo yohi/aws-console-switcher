@@ -32,7 +32,7 @@ import {
 // 既存テスト（tab-watchers.test.ts）が import('./tab-watchers.js').AlarmsApi を参照するため再エクスポートする。
 export type { AlarmsApi };
 
-const CONSOLE_URL_PATTERN = /^https:\/\/console\.aws\.amazon\.com\//;
+const CONSOLE_URL_PREFIX = "https://console.aws.amazon.com/";
 
 /**
  * タブ監視に必要な Chrome API の抽象。
@@ -80,7 +80,7 @@ export function startTabWatchers(deps: TabWatchersDeps): void {
   deps.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
     return (async () => {
       const url = changeInfo.url ?? tab.url;
-      if (!url || !CONSOLE_URL_PATTERN.test(url)) {
+      if (!url || !url.startsWith(CONSOLE_URL_PREFIX)) {
         return;
       }
       const ctx = await loadFlowContext(deps.storage, tabId);
