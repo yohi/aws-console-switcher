@@ -2,17 +2,26 @@
  * Service Worker メッセージルーターのユニットテスト（task 4.1）。
  */
 import { describe, expect, it, vi } from "vitest";
-import { routeMessage, handleMessage, type MessageRouterDeps } from "./message-router.js";
-import { type AccountMeta, type HostRequest, makeFlowError } from "@acs/shared";
+import { routeMessage, handleMessage, performNewLogin, type MessageRouterDeps } from "./message-router.js";
+import { type AccountMeta, type HostRequest, type SessionRecord, makeFlowError } from "@acs/shared";
 import {
   type CredentialProvider,
   type SecretSourceAdapter,
 } from "../secrets/bitwarden-credential-provider.js";
 import {
   loadAccountMetaCache,
+  loadSessionRecords,
   saveAccountMetaCache,
+  saveSessionRecord,
   type StorageArea,
 } from "./storage.js";
+import { type ScriptingApi } from "./console-state-detector.js";
+import {
+  type SessionManager,
+  type SessionTabsApi,
+  type SessionWindowsApi,
+  createSessionManager,
+} from "./session-manager.js";
 
 function createFakeStorage(): StorageArea {
   const data = new Map<string, unknown>();
@@ -80,6 +89,19 @@ function createFakeTabs() {
     update: vi.fn(async (_tabId: number, _props: object) => ({})),
     query: vi.fn(async (_query: object) => []),
     sendMessage: vi.fn(async (_tabId: number, _message: unknown) => undefined),
+    // console-state-detector.ts の ConsoleDetectorTabsApi 契約（既定はコンソールタブとして扱う）。
+    get: vi.fn(async (_tabId: number) => ({
+      url: "https://console.aws.amazon.com/console/home",
+    })),
+  };
+}
+
+/** console-state-detector.ts の ScriptingApi 契約のフェイク（既定は無検出扱いで安全側）。 */
+function createFakeScripting(
+  impl?: ScriptingApi["executeScript"],
+): ScriptingApi {
+  return {
+    executeScript: vi.fn(impl ?? (async () => [])) as ScriptingApi["executeScript"],
   };
 }
 
@@ -101,19 +123,67 @@ function createFakeAdapter(
   return { send: vi.fn(sendImpl ?? defaultSend) };
 }
 
+function createFakeSessionTabs(): SessionTabsApi {
+  return {
+    update: vi.fn(async (tabId: number, _props: { active?: boolean }) => ({
+      id: tabId,
+      windowId: tabId * 10,
+    })),
+    onActivated: { addListener: vi.fn() },
+  };
+}
+
+function createFakeSessionWindows(): SessionWindowsApi {
+  return { update: vi.fn(async () => undefined) };
+}
+
 function createDeps(
   overrides: Partial<MessageRouterDeps> = {},
 ): MessageRouterDeps {
-  return {
-    storage: createFakeStorage(),
-    credentialProvider: createFakeCredentialProvider(),
-    tabs: createFakeTabs() as unknown as MessageRouterDeps["tabs"],
-    runtime: { sendMessage: vi.fn() } as unknown as typeof chrome.runtime,
-    hostName: "com.example.host",
-    alarms: createFakeAlarms() as unknown as MessageRouterDeps["alarms"],
-    adapter: createFakeAdapter(),
-    ...overrides,
+  const storage = overrides.storage ?? createFakeStorage();
+  const credentialProvider =
+    overrides.credentialProvider ?? createFakeCredentialProvider();
+  const tabs =
+    overrides.tabs ?? (createFakeTabs() as unknown as MessageRouterDeps["tabs"]);
+  const runtime =
+    overrides.runtime ??
+    ({ sendMessage: vi.fn() } as unknown as typeof chrome.runtime);
+  const hostName = overrides.hostName ?? "com.example.host";
+  const alarms =
+    overrides.alarms ??
+    (createFakeAlarms() as unknown as MessageRouterDeps["alarms"]);
+  const adapter = overrides.adapter ?? createFakeAdapter();
+  const scripting =
+    overrides.scripting ?? (createFakeScripting() as unknown as MessageRouterDeps["scripting"]);
+  // sessionManager は startLogin の switchTo 経路が使う。既定は実 createSessionManager を
+  // フェイクの tabs/windows で構築し、未サインイン時の onNewLoginRequired が performNewLogin
+  // （新規タブ作成 + FlowContext 保存 + アラーム登録）へ委譲するよう配線する（bootstrap と同一配線）。
+  let deps: MessageRouterDeps;
+  const sessionManager =
+    overrides.sessionManager ??
+    createSessionManager({
+      storage,
+      tabs: createFakeSessionTabs(),
+      windows: createFakeSessionWindows(),
+      onNewLoginRequired: async (uuid) => {
+        const result = await performNewLogin(deps, uuid);
+        if (!result.ok) {
+          throw new Error(result.error.message);
+        }
+      },
+    });
+  deps = {
+    storage,
+    credentialProvider,
+    tabs,
+    runtime,
+    hostName,
+    alarms,
+    adapter,
+    sessionManager,
+    scripting,
   };
+  return deps;
 }
 
 describe("routeMessage", () => {
@@ -132,6 +202,66 @@ describe("routeMessage", () => {
       step: "routing",
       mfaRetryCount: 0,
     });
+  });
+
+  it("startLogin foregrounds an existing session via SessionManager.switchTo without creating a new tab (task 6.1)", async () => {
+    const switchTo = vi.fn(async () => ({ ok: true as const, value: undefined }));
+    const sessionManager: SessionManager = {
+      getActiveSessions: vi.fn(async () => []),
+      switchTo,
+      evictIfNeeded: vi.fn(async () => undefined),
+    };
+    const deps = createDeps({ sessionManager });
+    // 前面化対象の既存セッションを storage に用意する（switchTo 成功後に tabId を引く元）。
+    const record: SessionRecord = {
+      uuid: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+      accountId: "123456789012",
+      tabId: 77,
+      signedInAt: new Date().toISOString(),
+      lastAccessedAt: new Date().toISOString(),
+      state: "active",
+    };
+    await saveSessionRecord(deps.storage, record);
+
+    const response = await routeMessage(deps, {
+      kind: "startLogin",
+      uuid: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+    });
+
+    // switchTo 経由で解決し、新規タブ作成（performNewLogin）は行わない。
+    expect(switchTo).toHaveBeenCalledWith(
+      "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+    );
+    expect(deps.tabs.create).not.toHaveBeenCalled();
+    expect(response.ok).toBe(true);
+    if (response.ok) {
+      expect(response.value).toEqual({ tabId: 77 });
+    }
+  });
+
+  it("startLogin propagates a SessionManager.switchTo failure as a RouterResponse error (task 6.1)", async () => {
+    const sessionManager: SessionManager = {
+      getActiveSessions: vi.fn(async () => []),
+      switchTo: vi.fn(async () => ({
+        ok: false as const,
+        error: makeFlowError(
+          "invalid_configuration",
+          "No active session and a new login could not be started.",
+        ),
+      })),
+      evictIfNeeded: vi.fn(async () => undefined),
+    };
+    const deps = createDeps({ sessionManager });
+
+    const response = await routeMessage(deps, {
+      kind: "startLogin",
+      uuid: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+    });
+
+    expect(response.ok).toBe(false);
+    if (!response.ok) {
+      expect(response.error.code).toBe("invalid_configuration");
+    }
   });
 
   it("startLogin reads accounts from cache without hitting the provider when cache is non-empty (task 8.1 pattern reuse)", async () => {
@@ -201,6 +331,65 @@ describe("routeMessage", () => {
     expect(response.ok).toBe(true);
     expect(deps.credentialProvider.listAccounts).toHaveBeenCalledTimes(1);
     expect(await loadAccountMetaCache(deps.storage)).toHaveLength(1);
+  });
+
+  it("listAccounts corrects session states and includes sessions in the response (task 5.3/8.1)", async () => {
+    const scripting = createFakeScripting(async () => [
+      { result: { ready: true, accountId: "123456789012" } },
+    ]);
+    const deps = createDeps({
+      scripting: scripting as unknown as MessageRouterDeps["scripting"],
+    });
+    const record: SessionRecord = {
+      uuid: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+      accountId: "123456789012",
+      tabId: 42,
+      signedInAt: new Date().toISOString(),
+      lastAccessedAt: new Date().toISOString(),
+      state: "unknown",
+    };
+    await saveSessionRecord(deps.storage, record);
+
+    const response = await routeMessage(deps, { kind: "listAccounts" });
+
+    expect(response.ok).toBe(true);
+    if (response.ok) {
+      const value = response.value as { sessions: readonly SessionRecord[] };
+      expect(value.sessions).toHaveLength(1);
+      expect(value.sessions[0]).toMatchObject({ state: "active" });
+    }
+  });
+
+  it("syncAccounts corrects session states and includes sessions in the response (task 5.3/8.1)", async () => {
+    const scripting = createFakeScripting(async () => [
+      { result: { ready: true, accountId: "999999999999" } },
+    ]);
+    const deps = createDeps({
+      scripting: scripting as unknown as MessageRouterDeps["scripting"],
+    });
+    const record: SessionRecord = {
+      uuid: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+      accountId: "123456789012",
+      tabId: 42,
+      signedInAt: new Date().toISOString(),
+      lastAccessedAt: new Date().toISOString(),
+      state: "active",
+    };
+    await saveSessionRecord(deps.storage, record);
+
+    const response = await routeMessage(deps, { kind: "syncAccounts" });
+
+    expect(response.ok).toBe(true);
+    if (response.ok) {
+      const value = response.value as { sessions: readonly SessionRecord[] };
+      expect(value.sessions).toHaveLength(1);
+      // 検出された accountId が既存レコードと明確に異なるため、控えめに unknown へ補正し
+      // レコードの accountId も実態へ補正する（誤って signed-in と表示しない, 3.1）。
+      expect(value.sessions[0]).toMatchObject({
+        state: "unknown",
+        accountId: "999999999999",
+      });
+    }
   });
 
   it("ignores unknown messages without error", async () => {
@@ -481,6 +670,78 @@ describe("routeMessage", () => {
       accountId: "123456789012",
     });
     expect(response.ok).toBe(true);
+  });
+
+  it("corrects the matching SessionRecord to active when the reported accountId matches (consoleState real correction, task 5.3/8.1)", async () => {
+    const deps = createDeps();
+    const record: SessionRecord = {
+      uuid: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+      accountId: "123456789012",
+      tabId: 42,
+      signedInAt: new Date().toISOString(),
+      lastAccessedAt: new Date().toISOString(),
+      state: "unknown",
+    };
+    await saveSessionRecord(deps.storage, record);
+
+    const response = await routeMessage(deps, {
+      kind: "consoleState",
+      tabId: 42,
+      accountId: "123456789012",
+    });
+
+    expect(response.ok).toBe(true);
+    const sessions = await loadSessionRecords(deps.storage);
+    expect(sessions.find((s) => s.uuid === record.uuid)?.state).toBe("active");
+  });
+
+  it("corrects the matching SessionRecord to unknown and updates accountId on mismatch (consoleState real correction, task 5.3/8.1)", async () => {
+    const deps = createDeps();
+    const record: SessionRecord = {
+      uuid: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+      accountId: "123456789012",
+      tabId: 42,
+      signedInAt: new Date().toISOString(),
+      lastAccessedAt: new Date().toISOString(),
+      state: "active",
+    };
+    await saveSessionRecord(deps.storage, record);
+
+    const response = await routeMessage(deps, {
+      kind: "consoleState",
+      tabId: 42,
+      accountId: "999999999999",
+    });
+
+    expect(response.ok).toBe(true);
+    const sessions = await loadSessionRecords(deps.storage);
+    expect(sessions.find((s) => s.uuid === record.uuid)).toMatchObject({
+      state: "unknown",
+      accountId: "999999999999",
+    });
+  });
+
+  it("leaves storage untouched when no SessionRecord matches the reported tabId (consoleState real correction, task 5.3/8.1)", async () => {
+    const deps = createDeps();
+    const record: SessionRecord = {
+      uuid: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+      accountId: "123456789012",
+      tabId: 7,
+      signedInAt: new Date().toISOString(),
+      lastAccessedAt: new Date().toISOString(),
+      state: "active",
+    };
+    await saveSessionRecord(deps.storage, record);
+
+    const response = await routeMessage(deps, {
+      kind: "consoleState",
+      tabId: 999,
+      accountId: "123456789012",
+    });
+
+    expect(response.ok).toBe(true);
+    const sessions = await loadSessionRecords(deps.storage);
+    expect(sessions.find((s) => s.uuid === record.uuid)?.state).toBe("active");
   });
 });
 

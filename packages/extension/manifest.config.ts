@@ -45,17 +45,15 @@ export default defineManifest((env) => {
       service_worker: "src/service-worker/service-worker.ts",
       type: "module",
     },
-    // NOTE: console-detector-content-script.ts (console.aws.amazon.com 向け) はここには含めず、
-    // chrome.scripting.executeScript での動的注入を想定している（design.md 5.3）。
-    // TODO(task 5.3): 動的注入を実装する際は、本 manifest に `web_accessible_resources`
-    // エントリ（あるいは vite.config.ts への追加ビルドエントリ）を配線すること。
-    // 現状は manifest から未参照のため @crxjs/vite-plugin がこのファイルを dist に
-    // バンドルせず、実行時に `chrome.scripting.executeScript({ files: [...] })` が失敗する。
-    // NOTE(task 9.2 調査): 上記 TODO は意図的に据え置く。理由: (1) SW 側の呼び出し元（handleConsoleState の
-    // chrome.tabs.query + chrome.scripting.executeScript オーケストレーション）が未実装で対をなす配線先が無い。
-    // (2) @crxjs/vite-plugin 2.7.1 は web_accessible_resources に素の .ts を列挙しても予測可能なパスの
-    // 注入用ビルド成果物を生成せず、追加の vite ビルドエントリ変更を要する。(3) npm test / typecheck は crxjs
-    // ビルドを経由しないため投機的追加は検証不能な壊れた設定を招く。呼び出し元実装（後続タスク）と同時に配線すること。
+    // NOTE(task 5.3, 実装済み): console-detector-content-script.ts の検出ロジックは
+    // content_scripts/web_accessible_resources には列挙しない。SW の
+    // service-worker/console-state-detector.ts が `chrome.scripting.executeScript` の **func 方式**
+    // （`func` + `args`）で自己完結関数（`injectableDetectConsoleState`）を対象タブへ直接注入する。
+    // 選定理由: `func` は Chrome によりコード自体がシリアライズされ対象ページの孤立ワールドで評価されるため
+    // dist に存在するファイルを作る必要がなく（files 方式とは違い）、
+    // @crxjs/vite-plugin の web_accessible_resources・追加ビルドエントリ配線を一切必要としない。
+    // この選定により、旧 TODO（task 5.3 定義時および task 9.2 調査時の web_accessible_resources
+    // 未配線の指摘）は解消した。詳細は console-state-detector.ts のファイル先頭コメントを参照。
     content_scripts: [
       {
         matches: SIGNIN_MATCHES,

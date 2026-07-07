@@ -12,6 +12,7 @@ import {
   type FlowError,
   type HostRequest,
   type Result,
+  type SessionRecord,
   type SigninDomEvent,
   isExtMessage,
   makeFlowError,
@@ -21,6 +22,7 @@ import {
   loadAccountMetaCache,
   loadExtensionSettings,
   loadFlowContext,
+  loadSessionRecords,
   saveAccountMetaCache,
   saveExtensionSettings,
   saveFlowContext,
@@ -37,6 +39,16 @@ import {
 } from "./login-state-machine.js";
 import { createLiveLoginMessenger } from "./live-login-messenger.js";
 import { cleanupFlow } from "./tab-watchers.js";
+import { type SessionManager } from "./session-manager.js";
+import {
+  type ConsoleDetectionResult,
+} from "../content-scripts/console-detector-content-script.js";
+import { DEFAULT_SELECTOR_SET } from "../content-scripts/selectors.js";
+import {
+  type ScriptingApi,
+  correctSessionFromReport,
+  correctSessionStates,
+} from "./console-state-detector.js";
 
 /**
  * `chrome.tabs` からルーターが必要とするメソッドのみを切り出した抽象。
@@ -49,6 +61,11 @@ export interface TabsApi {
   query(queryInfo: object): Promise<chrome.tabs.Tab[]>;
   /** CS への値注入コマンド送信（chrome.tabs.sendMessage の抽象。LoginMessenger のライブ実装が使用）。 */
   sendMessage(tabId: number, message: unknown): Promise<unknown>;
+  /**
+   * 対象タブの現況を取得する（console-state-detector.ts の `ConsoleDetectorTabsApi` 契約と互換）。
+   * 閉鎖済み/存在しない tabId には reject する（chrome.tabs.get の実挙動）。
+   */
+  get(tabId: number): Promise<{ readonly id?: number; readonly url?: string }>;
 }
 
 /**
@@ -62,6 +79,9 @@ export interface MessageRouterDeps {
   readonly hostName: string;
   readonly alarms: AlarmsApi;
   readonly adapter: SecretSourceAdapter;
+  readonly sessionManager: SessionManager;
+  /** console-state-detector.ts のコンソール状態検出注入に用いる（task 5.3）。 */
+  readonly scripting: ScriptingApi;
 }
 
 /**
@@ -117,7 +137,7 @@ export async function routeMessage(
     case "signinDomEvent":
       return handleSigninDomEvent(deps, message);
     case "consoleState":
-      return handleConsoleState(message);
+      return handleConsoleState(deps, message);
     default: {
       const _exhaustive: never = message;
       return { ok: true, value: _exhaustive };
@@ -153,19 +173,74 @@ async function loadAccountsCacheThenFallback(
  *
  * cache-then-fallback（loadAccountsCacheThenFallback）を介して取得する。
  */
+
+/**
+ * console-state-detector.ts の `correctSessionStates` を呼び `SessionRecord.state`（及び矛盾時の
+ * `accountId`）を補正してから、補正後の全 `SessionRecord[]` を読み返す（task 5.3/8.1）。
+ * `listAccounts` / `syncAccounts` の応答構築前に呼ぶことで、design.md 8.1「Vault アンロック解除後の
+ * 初回アクセス時に同期を再実行する」の精神に合わせる（unlock 直後の listAccounts 呼び出し経路でも
+ * 自然に補正がかかる）。現状は設定からのセレクタ上書き・永続化の配線は無いため、
+ * 常に同梱既定値 `DEFAULT_SELECTOR_SET` を使用する。
+ */
+async function correctAndLoadSessions(
+  deps: MessageRouterDeps,
+): Promise<readonly SessionRecord[]> {
+  await correctSessionStates({
+    storage: deps.storage,
+    tabs: deps.tabs,
+    scripting: deps.scripting,
+    selectors: DEFAULT_SELECTOR_SET,
+  });
+  return loadSessionRecords(deps.storage);
+}
 async function listAccounts(deps: MessageRouterDeps): Promise<RouterResponse> {
   const result = await loadAccountsCacheThenFallback(deps);
   if (!result.ok) {
     return result;
   }
-  return { ok: true, value: { accounts: result.value } };
+  const sessions = await correctAndLoadSessions(deps);
+  return { ok: true, value: { accounts: result.value, sessions } };
 }
 
+/**
+ * ログインを開始する（task 4.1 / 6.1, requirements 3.2 / 3.2.1）。
+ *
+ * design.md「Ports（将来 SSO 対応の抽象, 4.2）」の `SessionManager.switchTo` 契約に従い、
+ * 対象 UUID の既存セッションがあれば前面化し、無ければ（未サインイン or タブ無効）新規ログインへ
+ * フォールバックする。新規ログインの実体（タブ作成 + FlowContext 保存 + アラーム登録）は
+ * `performNewLogin` へ切り出し、`SessionManager.onNewLoginRequired` 経由で新規ログイン確定時
+ * にのみ実行する（二重実装を作らず単一経路を共有する）。
+ */
 async function startLogin(
   deps: MessageRouterDeps,
   uuid: string,
 ): Promise<RouterResponse> {
-  // startLogin も listAccounts と同じ cache-then-fallback 経路を共有し、毎回のシリンフーレス取得（ホスト往復）を避ける。
+  // 既存は前面化、未サインイン or タブ無効は新規ログイン（onNewLoginRequired 経由の performNewLogin）へ
+  // フォールバックする（design.md「Ports」 SessionManager.switchTo 契約）。
+  const result = await deps.sessionManager.switchTo(uuid);
+  if (!result.ok) {
+    // switchTo の FlowError（新規ログイン起動失敗など）をそのまま Popup へ返す。
+    return result;
+  }
+  // 前面化成功時は既存 SessionRecord から tabId を返す。新規ログイン確定時はまだ SessionRecord が
+  // 無い（done 時に recordSession が作成）ため value:undefined を返す（design.md 要求上許容）。
+  const sessions = await loadSessionRecords(deps.storage);
+  const record = sessions.find((session) => session.uuid === uuid);
+  return { ok: true, value: record ? { tabId: record.tabId } : undefined };
+}
+
+/**
+ * 新規ログインフローを起動する（task 4.1 / 6.1）。
+ *
+ * 既存セッションが無い（未サインイン or タブ無効）場合にのみ SessionManager から呼ばれる。
+ * listAccounts と同じ cache-then-fallback 経路を共有し、毎回のステートレス取得（ホスト往復）を避ける。
+ * タブ作成 → FlowContext 保存 → dom_timeout 監視アラーム登録までを 1 経路で行う（design.md 2.2）。
+ */
+export async function performNewLogin(
+  deps: MessageRouterDeps,
+  uuid: string,
+): Promise<RouterResponse> {
+  // performNewLogin も listAccounts と同じ cache-then-fallback 経路を共有し、毎回のステートレス取得（ホスト往復）を避ける。
   const accounts = await loadAccountsCacheThenFallback(deps);
   if (!accounts.ok) {
     return accounts;
@@ -349,7 +424,8 @@ async function syncAccounts(
     return result;
   }
   await saveAccountMetaCache(deps.storage, result.value);
-  return { ok: true, value: { accounts: result.value } };
+  const sessions = await correctAndLoadSessions(deps);
+  return { ok: true, value: { accounts: result.value, sessions } };
 }
 
 async function handleSigninDomEvent(
@@ -426,9 +502,20 @@ function signinDomEventToLoginEvent(event: SigninDomEvent): LoginEvent {
   }
 }
 
+/**
+ * Content Script が能動的に送出した `consoleState` メッセージを受理し、console-state-detector.ts の
+ * `correctSessionFromReport`（push 経路）で対象セッションを補正する（task 5.3/8.1）。
+ * `buildConsoleStateMessage`（content-script）は `ready` のときのみ本メッセージを送出するため、
+ * 受信した時点で常に `ready: true` の検出結果として解釈する（content-script 側の契約）。
+ */
 async function handleConsoleState(
-  _message: Extract<ExtMessage, { kind: "consoleState" }>,
+  deps: MessageRouterDeps,
+  message: Extract<ExtMessage, { kind: "consoleState" }>,
 ): Promise<RouterResponse> {
-  // task 5.3 / 8.1 でセッション補正を実装する。
+  const detection: ConsoleDetectionResult =
+    message.accountId === undefined
+      ? { ready: true }
+      : { ready: true, accountId: message.accountId };
+  await correctSessionFromReport(deps, message.tabId, detection);
   return { ok: true, value: undefined };
 }
