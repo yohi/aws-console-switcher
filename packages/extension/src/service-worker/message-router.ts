@@ -21,7 +21,6 @@ import {
   loadAccountMetaCache,
   loadExtensionSettings,
   loadFlowContext,
-  removeFlowContext,
   saveAccountMetaCache,
   saveExtensionSettings,
   saveFlowContext,
@@ -226,7 +225,7 @@ async function resetFlow(
   );
   if (flowKey) {
     const tabId = Number(flowKey.split(":")[1]);
-    await removeFlowContext(deps.storage, tabId);
+    await cleanupFlow(deps.storage, deps.alarms, tabId);
   }
   return { ok: true, value: undefined };
 }

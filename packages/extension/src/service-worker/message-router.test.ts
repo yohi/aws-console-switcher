@@ -422,6 +422,8 @@ describe("routeMessage", () => {
     expect(response.ok).toBe(true);
     const stored = await deps.storage.get("flow:42");
     expect(stored["flow:42"]).toBeUndefined();
+    // task: resetFlow はクリーンアップ単一経路（cleanupFlow）を通し、flowTimeout アラームも解除する。
+    expect(deps.alarms.clear).toHaveBeenCalledWith("flowTimeout:42");
   });
 
   it("removes the persisted FlowContext for the matching uuid on retryLogin", async () => {
@@ -444,6 +446,7 @@ describe("routeMessage", () => {
     expect(response.ok).toBe(true);
     const stored = await deps.storage.get("flow:7");
     expect(stored["flow:7"]).toBeUndefined();
+    expect(deps.alarms.clear).toHaveBeenCalledWith("flowTimeout:7");
   });
 
   it("no-ops safely on cancelLogin when no persisted flow matches the uuid", async () => {
@@ -467,6 +470,7 @@ describe("routeMessage", () => {
     // 非対象 uuid のフローは削除されない。
     const stored = await deps.storage.get("flow:42");
     expect(stored["flow:42"]).toBeDefined();
+    expect(deps.alarms.clear).not.toHaveBeenCalled();
   });
 
   it("acknowledges consoleState without error (task 5.3/8.1 stub route)", async () => {
