@@ -30,15 +30,22 @@ import {
 } from "../content-scripts/console-detector-content-script.js";
 
 /**
- * ログイン後コンソールの URL 接頭辞。tab-watchers.ts の `CONSOLE_URL_PREFIX` と同一由来の値だが、
+ * ログイン後コンソールの URL パターン。tab-watchers.ts の `CONSOLE_URL_PREFIX` と同一由来の値だが、
  * 両モジュールは意図的に疎結合（DI 抽象を共有しない最小面）を保つため、既存の小さなローカル定数の
  * 重複パターン（flow-alarms.ts の `FLOW_ALARM_PREFIX` 等）に倣いここでも個別に定義する。
+ *
+ * `console.aws.amazon.com` に加え `us-east-1.console.aws.amazon.com` のようなリージョナルサブドメイン
+ * も許可する（AWS コンソールは EC2/RDS 等のサービスページでリージョナルホストへ遷移することがあるため。
+ * manifest.config.ts の `CONSOLE_MATCHES` host_permissions もこの正規表現と一致する範囲まで拡張済み）。
+ * サブドメイン部分は英数字とハイフンのみに制限し、任意ホストへの誤マッチ（例:
+ * `https://evilconsole.aws.amazon.com.attacker.example/`）を防ぐ。
  */
-const CONSOLE_URL_PREFIX = "https://console.aws.amazon.com/";
+const CONSOLE_URL_PATTERN =
+  /^https:\/\/([a-z0-9-]+\.)?console\.aws\.amazon\.com\//;
 
-/** URL が現行ログイン後コンソール（`console.aws.amazon.com`）のものか判定する純粋関数。 */
+/** URL が現行ログイン後コンソール（`console.aws.amazon.com` 及びそのリージョナルサブドメイン）のものか判定する純粋関数。 */
 export function isConsoleTabUrl(url: string | undefined): boolean {
-  return url !== undefined && url.startsWith(CONSOLE_URL_PREFIX);
+  return url !== undefined && CONSOLE_URL_PATTERN.test(url);
 }
 
 /**
@@ -180,11 +187,21 @@ async function correctSingleSession(
     return;
   }
 
-  const results = await deps.scripting.executeScript({
-    target: { tabId: session.tabId },
-    func: injectableDetectConsoleState,
-    args: [deps.selectors, CONSOLE_ACCOUNT_IDENTITY_SELECTORS],
-  });
+  let results: ReadonlyArray<{ readonly result?: ConsoleDetectionResult }>;
+  try {
+    results = await deps.scripting.executeScript({
+      target: { tabId: session.tabId },
+      func: injectableDetectConsoleState,
+      args: [deps.selectors, CONSOLE_ACCOUNT_IDENTITY_SELECTORS],
+    });
+  } catch {
+    // executeScript の reject（tabs.get 後にタブが閉じた TOCTOU・host_permission 不足・
+    // 対象フレームが特殊ページ等）: tabs.get と同様にタブ側の理由で確証が得られないケースだが、
+    // ここでは早計な判定をせず既存状態を維持する（実行結果が得られない場合の分岐と同じ扱い）。
+    // 呼び出し元 correctSessionStates は Promise.all で全セッションを束ねるため、ここで reject を
+    // 伝播させると 1 件のタブ起因の失敗で listAccounts/syncAccounts 全体の応答が壊れてしまう。
+    return;
+  }
   const detection = results[0]?.result;
   if (detection === undefined) {
     // 実行結果が得られない（フレーム未応答等）: 早計な判定をしない。

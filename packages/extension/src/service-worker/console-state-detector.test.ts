@@ -113,6 +113,18 @@ describe("isConsoleTabUrl", () => {
   it("returns false for undefined", () => {
     expect(isConsoleTabUrl(undefined)).toBe(false);
   });
+
+  it("returns true for a regional console.aws.amazon.com URL (e.g. us-east-1)", () => {
+    expect(
+      isConsoleTabUrl("https://us-east-1.console.aws.amazon.com/ec2/home"),
+    ).toBe(true);
+  });
+
+  it("returns false for a spoofed host that merely contains the console domain as a suffix", () => {
+    expect(
+      isConsoleTabUrl("https://console.aws.amazon.com.evil.example/"),
+    ).toBe(false);
+  });
 });
 
 describe("applyDetectionResult", () => {
@@ -196,6 +208,22 @@ describe("correctSessionStates", () => {
 
     const sessions = await loadSessionRecords(storage);
     // 未ロード等で不確定な場合は早計な判定をせず、既存状態を維持する（3.1）。
+    expect(sessions[0]?.state).toBe("active");
+  });
+
+  it("does not throw and preserves the existing state when scripting.executeScript rejects (task 5.3 robustness)", async () => {
+    const storage = createFakeStorage();
+    await saveSessionRecord(storage, makeSession({ state: "active" }));
+    const scripting = createFakeScripting(async () => {
+      throw new Error("No tab with id: 42.");
+    });
+    const deps = createDeps({ storage, scripting });
+
+    await expect(correctSessionStates(deps)).resolves.toBeUndefined();
+
+    const sessions = await loadSessionRecords(storage);
+    // executeScript の reject は tabs.get と同じようにタブ側の理由だが、Promise.all を壊さないようここで
+    // executeScript で例外が発生してもここで吸収し、既存状態を維持する。
     expect(sessions[0]?.state).toBe("active");
   });
 

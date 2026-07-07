@@ -9,8 +9,16 @@ const SIGNIN_MATCHES = [
   "https://signin.aws.amazon.com/*",
   "https://*.signin.aws.amazon.com/*",
 ];
-/** ログイン後コンソール（現ログイン状態の検出用）。 */
-const CONSOLE_HOST = "https://console.aws.amazon.com/*";
+/**
+ * ログイン後コンソール（現ログイン状態の検出用）。ベアドメインとリージョナルサブドメイン
+ * （例: `us-east-1.console.aws.amazon.com`）の両方を明記する（SIGNIN_MATCHES と同様の方針。
+ * `*.console.aws.amazon.com` がベアドメインを含むかは Chrome の match pattern 仕様上曖昧なため、
+ * 両方を明示し console-state-detector.ts の `isConsoleTabUrl` と一致させる）。
+ */
+const CONSOLE_MATCHES = [
+  "https://console.aws.amazon.com/*",
+  "https://*.console.aws.amazon.com/*",
+];
 /** `bw serve` 代替経路。本番ビルドからは常に除外される（2.1.2, 9.2）。 */
 const BW_SERVE_HOST = "http://localhost:8087/*";
 
@@ -25,7 +33,7 @@ export default defineManifest((env) => {
   const flags = resolveBuildFlags({ mode: env.mode, env: process.env });
   const key = resolveExtensionKey(process.env);
 
-  const hostPermissions = [...SIGNIN_MATCHES, CONSOLE_HOST];
+  const hostPermissions = [...SIGNIN_MATCHES, ...CONSOLE_MATCHES];
   if (flags.includeBwServe) {
     hostPermissions.push(BW_SERVE_HOST);
   }
