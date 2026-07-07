@@ -3,6 +3,7 @@ import {
   makeFlowError,
   ok,
   type FlowError,
+  type HostRequest,
   type Result,
 } from "@acs/shared";
 import { describe, expect, it, vi } from "vitest";
@@ -232,5 +233,143 @@ describe("task 2.3 Bitwarden dispatcher handlers", () => {
       expect(response.error.code).toBe("host_not_running");
       expect(response.error.category).toBe("precondition");
     }
+  });
+});
+
+describe("task 10.2 dispatcher integration (locked-vault preconditions)", () => {
+  it("returns vault_locked for every secret operation before unlock", async () => {
+    // Given: a dispatcher whose vault has never been unlocked.
+    const session = createSessionManager(() => new Date("2026-07-03T01:02:03.004Z"));
+    const dispatcher = createHostDispatcher({ bwCli: makeFakeBwCli(), session });
+
+    // When: each vault-dependent request is dispatched without a held BW_SESSION.
+    const requests: readonly HostRequest[] = [
+      { requestId: "r-folders", type: "listFolders" },
+      { requestId: "r-items", type: "listItems", folderId: "folder-1" },
+      { requestId: "r-item", type: "getItem", uuid: UUID },
+      { requestId: "r-totp", type: "getTotp", uuid: UUID },
+    ];
+    const responses = await Promise.all(
+      requests.map((request) => dispatcher.handleRequest(request)),
+    );
+
+    // Then: each is rejected as a vault_locked precondition that still echoes its requestId.
+    expect(responses.map((response) => response.requestId)).toEqual(
+      requests.map((request) => request.requestId),
+    );
+    for (const response of responses) {
+      expect(response.type).toBe("error");
+      if (response.type === "error") {
+        expect(response.error.category).toBe("precondition");
+        expect(response.error.code).toBe("vault_locked");
+      }
+    }
+  });
+});
+
+describe("task 10.2 dispatcher integration (unlock -> sync -> lock lifecycle)", () => {
+  it("threads the resolved folder id through one unlocked session and reports status transitions", async () => {
+    // Given: a fresh dispatcher frozen at a TOTP window with 27 seconds remaining.
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-03T01:02:03.004Z"));
+    try {
+      const session = createSessionManager(() => new Date(Date.now()));
+      const listItemsFolderIds: string[] = [];
+      const bwCli: BwCli = {
+        ...makeFakeBwCli(),
+        listItems: async (folderId: string) => {
+          listItemsFolderIds.push(folderId);
+          return ok(ITEMS_JSON);
+        },
+      };
+      const dispatcher = createHostDispatcher({ bwCli, session });
+
+      // When: the full unlock -> initial-sync -> secret -> lock sequence runs on one dispatcher.
+      const unlocked = await dispatcher.handleRequest({
+        requestId: "r-unlock",
+        type: "unlock",
+        masterPassword: "transient-secret",
+      });
+      const statusAfterUnlock = await dispatcher.handleRequest({ requestId: "r-status-1", type: "status" });
+      const foldersResponse = await dispatcher.handleRequest({ requestId: "r-folders", type: "listFolders" });
+      // Resolve folderName -> folderId from listFolders and thread it into listItems (design M-3).
+      const folderId = foldersResponse.type === "folders" ? foldersResponse.folders[0]?.id ?? "" : "";
+      const itemsResponse = await dispatcher.handleRequest({ requestId: "r-items", type: "listItems", folderId });
+      const itemResponse = await dispatcher.handleRequest({ requestId: "r-item", type: "getItem", uuid: UUID });
+      const totpResponse = await dispatcher.handleRequest({ requestId: "r-totp", type: "getTotp", uuid: UUID });
+      const lockResponse = await dispatcher.handleRequest({ requestId: "r-lock", type: "lock" });
+      const statusAfterLock = await dispatcher.handleRequest({ requestId: "r-status-2", type: "status" });
+
+      // Then: state flows unlocked -> locked and the resolved folder id drives listItems.
+      expect(unlocked).toEqual({ requestId: "r-unlock", type: "unlocked" });
+      expect(statusAfterUnlock).toEqual({
+        requestId: "r-status-1",
+        type: "status",
+        unlocked: true,
+        lastUsedAt: "2026-07-03T01:02:03.004Z",
+      });
+      expect(folderId).toBe("folder-1");
+      expect(listItemsFolderIds).toEqual(["folder-1"]);
+      expect(itemsResponse.type).toBe("items");
+      expect(itemResponse).toEqual({
+        requestId: "r-item",
+        type: "item",
+        username: "iam-user",
+        password: "secret-password",
+      });
+      expect(totpResponse).toEqual({
+        requestId: "r-totp",
+        type: "totp",
+        code: "123456",
+        remainingSeconds: 27,
+      });
+      expect(lockResponse).toEqual({ requestId: "r-lock", type: "locked" });
+      expect(statusAfterLock).toEqual({
+        requestId: "r-status-2",
+        type: "status",
+        unlocked: false,
+        lastUsedAt: "2026-07-03T01:02:03.004Z",
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe("task 10.2 dispatcher integration (requestId demux under interleaving)", () => {
+  it("binds each response to its own requestId and payload when bw calls resolve out of order", async () => {
+    // Given: an unlocked dispatcher whose getItem for two uuids can be resolved in reverse order.
+    const session = createSessionManager(() => new Date("2026-07-03T01:02:03.004Z"));
+    const resolvers = new Map<string, (value: Result<string, FlowError>) => void>();
+    const itemJsonFor = (username: string, password: string): string =>
+      JSON.stringify({ login: { username, password } });
+    const bwCli: BwCli = {
+      ...makeFakeBwCli(),
+      getItem: (uuid: string) =>
+        new Promise<Result<string, FlowError>>((resolve) => {
+          resolvers.set(uuid, resolve);
+        }),
+    };
+    const dispatcher = createHostDispatcher({ bwCli, session });
+    await dispatcher.handleRequest({
+      requestId: "r-unlock",
+      type: "unlock",
+      masterPassword: "transient-secret",
+    });
+
+    // When: two getItem requests are issued and then completed in reverse arrival order.
+    const first = dispatcher.handleRequest({ requestId: "r-item-A", type: "getItem", uuid: "uuid-A" });
+    const second = dispatcher.handleRequest({ requestId: "r-item-B", type: "getItem", uuid: "uuid-B" });
+    await vi.waitFor(() => {
+      expect(resolvers.has("uuid-A")).toBe(true);
+      expect(resolvers.has("uuid-B")).toBe(true);
+    });
+    resolvers.get("uuid-B")?.(ok(itemJsonFor("user-B", "pass-B")));
+    resolvers.get("uuid-A")?.(ok(itemJsonFor("user-A", "pass-A")));
+    const [responseA, responseB] = await Promise.all([first, second]);
+
+    // Then: each response keeps its own requestId and its own item payload (no cross-contamination).
+    expect(responseA).toEqual({ requestId: "r-item-A", type: "item", username: "user-A", password: "pass-A" });
+    expect(responseB).toEqual({ requestId: "r-item-B", type: "item", username: "user-B", password: "pass-B" });
   });
 });

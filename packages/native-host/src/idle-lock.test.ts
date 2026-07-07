@@ -177,4 +177,69 @@ describe("startIdleLockTimer", () => {
       vi.useRealTimers();
     }
   });
+
+  it("applies a mid-session idleLockMinutes change before the next idle check", async () => {
+    // Given: an unlocked session initially configured with a long 60-minute idle window.
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-03T01:00:00.000Z"));
+    const lockCalls: string[] = [];
+    const session = createSessionManager(() => new Date(Date.now()));
+    session.configure({ idleLockMinutes: 60, totpMinRemainingSeconds: 5 });
+    session.unlock("bw-session-token");
+    const timer = startIdleLockTimer({
+      bwCli: makeFakeBwCli(lockCalls),
+      session,
+      intervalMs: 1_000,
+    });
+
+    try {
+      // When: two minutes pass under the 60-minute window, then the window shrinks to one minute.
+      await vi.advanceTimersByTimeAsync(120_000);
+      expect(lockCalls).toEqual([]);
+      session.configure({ idleLockMinutes: 1, totpMinRemainingSeconds: 5 });
+
+      // Then: the next idle check honors the newly configured one-minute threshold and locks.
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(lockCalls).toEqual(["bw-session-token"]);
+      expect(session.currentSession()).toBeUndefined();
+    } finally {
+      timer.stop();
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps the vault unlocked while touch() keeps resetting the idle clock", async () => {
+    // Given: an unlocked session with a one-minute idle window checked every ten seconds.
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-03T01:00:00.000Z"));
+    const lockCalls: string[] = [];
+    const session = createSessionManager(() => new Date(Date.now()));
+    session.configure({ idleLockMinutes: 1, totpMinRemainingSeconds: 5 });
+    session.unlock("bw-session-token");
+    const timer = startIdleLockTimer({
+      bwCli: makeFakeBwCli(lockCalls),
+      session,
+      intervalMs: 10_000,
+    });
+
+    try {
+      // When: activity touches the session every 40 seconds across three idle-check cycles.
+      for (let cycle = 0; cycle < 3; cycle += 1) {
+        await vi.advanceTimersByTimeAsync(40_000);
+        session.touch();
+      }
+
+      // Then: continuous activity prevents the idle auto-lock from ever firing.
+      expect(lockCalls).toEqual([]);
+      expect(session.currentSession()).toBe("bw-session-token");
+
+      // And when activity stops, the idle window elapses and the vault locks.
+      await vi.advanceTimersByTimeAsync(71_000);
+      expect(lockCalls).toEqual(["bw-session-token"]);
+      expect(session.currentSession()).toBeUndefined();
+    } finally {
+      timer.stop();
+      vi.useRealTimers();
+    }
+  });
 });

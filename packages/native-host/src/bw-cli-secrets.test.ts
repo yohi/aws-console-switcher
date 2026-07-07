@@ -174,3 +174,74 @@ describe("createBwCli task 2.3 commands", () => {
     }
   });
 });
+
+describe("createBwCli task 10.2 chained secret retrieval", () => {
+  it("threads the folder id and item uuid through a single bw session across commands", async () => {
+    // Given: one stateful runner that answers each bw subcommand with realistic JSON.
+    const folderJson = JSON.stringify([{ id: "folder-1", name: "AWS Accounts" }]);
+    const itemsJson = JSON.stringify([
+      { id: UUID, login: { username: "iam-user", password: "secret-password" } },
+    ]);
+    const itemJson = JSON.stringify({
+      id: UUID,
+      login: { username: "iam-user", password: "secret-password" },
+    });
+    const captured: BwCommand[] = [];
+    const runner = async (command: BwCommand): Promise<CommandOutcome> => {
+      captured.push({ ...command, env: { ...command.env } });
+      const [verb, noun] = command.args;
+      if (verb === "unlock") {
+        return { exitCode: 0, stdout: "bw-session-token\n", stderr: "" };
+      }
+      if (verb === "list" && noun === "folders") {
+        return { exitCode: 0, stdout: `${folderJson}\n`, stderr: "" };
+      }
+      if (verb === "list" && noun === "items") {
+        return { exitCode: 0, stdout: `${itemsJson}\n`, stderr: "" };
+      }
+      if (verb === "get" && noun === "item") {
+        return { exitCode: 0, stdout: `${itemJson}\n`, stderr: "" };
+      }
+      if (verb === "get" && noun === "totp") {
+        return { exitCode: 0, stdout: "123456\n", stderr: "" };
+      }
+      return { exitCode: 1, stdout: "", stderr: "unexpected command" };
+    };
+    const cli = createBwCli(runner);
+
+    // When: unlock yields a session token that scopes each subsequent chained command.
+    const unlockResult = await cli.unlock("correct horse battery staple");
+    expect(unlockResult.ok).toBe(true);
+    const sessionToken = unlockResult.ok ? unlockResult.value : "";
+
+    const foldersResult = await cli.listFolders(sessionToken);
+    const folderId = foldersResult.ok
+      ? (JSON.parse(foldersResult.value) as { id: string }[])[0]?.id ?? ""
+      : "";
+
+    const itemsResult = await cli.listItems(folderId, sessionToken);
+    const itemUuid = itemsResult.ok
+      ? (JSON.parse(itemsResult.value) as { id: string }[])[0]?.id ?? ""
+      : "";
+
+    const itemResult = await cli.getItem(itemUuid, sessionToken);
+    const totpResult = await cli.getTotp(itemUuid, sessionToken);
+
+    // Then: each chained command targets the id resolved by the previous step and reuses BW_SESSION.
+    expect(sessionToken).toBe("bw-session-token");
+    expect(folderId).toBe("folder-1");
+    expect(itemUuid).toBe(UUID);
+    expect(itemResult.ok).toBe(true);
+    expect(totpResult).toEqual({ ok: true, value: "123456" });
+    expect(captured.map((command) => command.args)).toEqual([
+      ["unlock", "--raw", "--passwordenv", expect.stringMatching(/^ACS_BW_MASTER_PASSWORD_/u)],
+      ["list", "folders"],
+      ["list", "items", "--folderid", "folder-1"],
+      ["get", "item", UUID],
+      ["get", "totp", UUID],
+    ]);
+    for (const command of captured.slice(1)) {
+      expect(command.env).toEqual(expect.objectContaining({ BW_SESSION: "bw-session-token" }));
+    }
+  });
+});

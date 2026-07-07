@@ -75,3 +75,55 @@ describe("Native Messaging stdio framing", () => {
     }
   });
 });
+
+describe("task 10.2 Native Messaging stream lifecycle", () => {
+  it("returns undefined from finish() when the stream ends on a frame boundary", () => {
+    // Given: a parser that has fully consumed a complete frame (clean disconnect).
+    const parser = new NativeMessageParser();
+    const results = parser.push(encodeNativeMessage({ requestId: "r-clean", type: "locked" }));
+
+    // When: the stream ends with no bytes left buffered.
+    const result = parser.finish();
+
+    // Then: a clean end is not misreported as a disconnection error.
+    expect(results).toHaveLength(1);
+    expect(result).toBeUndefined();
+  });
+
+  it("emits one result per frame when several complete frames arrive in a single chunk", () => {
+    // Given: three framed messages concatenated into a single buffer (pipelined requests).
+    const parser = new NativeMessageParser();
+    const combined = Buffer.concat([
+      encodeNativeMessage({ requestId: "r-1", type: "status" }),
+      encodeNativeMessage({ requestId: "r-2", type: "lock" }),
+      encodeNativeMessage({ requestId: "r-3", type: "locked" }),
+    ]);
+
+    // When: the batched buffer is pushed at once.
+    const results = parser.push(combined);
+
+    // Then: each frame is decoded in arrival order within the same push.
+    expect(results).toEqual([
+      { ok: true, value: { requestId: "r-1", type: "status" } },
+      { ok: true, value: { requestId: "r-2", type: "lock" } },
+      { ok: true, value: { requestId: "r-3", type: "locked" } },
+    ]);
+  });
+
+  it("reports host_disconnected when the stream ends after only part of the length header", () => {
+    // Given: fewer than the four header bytes have arrived (mid-header disconnect).
+    const parser = new NativeMessageParser();
+    const partialHeader = parser.push(Buffer.from([0x01, 0x00]));
+
+    // When: the stream finishes before the length prefix is complete.
+    const result = parser.finish();
+
+    // Then: no frame is emitted and the truncated header is a stream disconnection.
+    expect(partialHeader).toEqual([]);
+    expect(result?.ok).toBe(false);
+    if (result?.ok === false) {
+      expect(result.error.category).toBe("precondition");
+      expect(result.error.code).toBe("host_disconnected");
+    }
+  });
+});

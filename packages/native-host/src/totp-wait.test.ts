@@ -157,4 +157,30 @@ describe("getTotpCodeWithWindowWait", () => {
     }
     expect(fetchCalls).toEqual(["fetch"]);
   });
+
+  it("re-fetches at most once and never loops even if the second code is still near expiry", async () => {
+    // Given: the clock never advances past the window boundary, so every fetched code is near expiry.
+    const fetchCalls: string[] = [];
+    const sleepCalls: number[] = [];
+
+    // When: a code is requested with a five-second minimum but the window never refreshes.
+    const result = await getTotpCodeWithWindowWait({
+      minRemainingSeconds: 5,
+      fetchCode: async () => {
+        const code = fetchCalls.length === 0 ? "111111" : "222222";
+        fetchCalls.push(code);
+        return ok(`${code}\n`);
+      },
+      nowMs: () => 28_000,
+      sleep: async (durationMs: number) => {
+        sleepCalls.push(durationMs);
+        // Intentionally do not advance the clock: emulate bw never returning a fresh window.
+      },
+    });
+
+    // Then: the wait is bounded to a single sleep and a single re-fetch (no unbounded retry loop).
+    expect(result).toEqual({ ok: true, value: { code: "222222", remainingSeconds: 2 } });
+    expect(fetchCalls).toEqual(["111111", "222222"]);
+    expect(sleepCalls).toEqual([3_000]);
+  });
 });

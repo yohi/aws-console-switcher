@@ -27,6 +27,7 @@ describe("category / code catalogs", () => {
     expect([...FLOW_ERROR_CODES]).toEqual([
       "host_not_running",
       "host_disconnected",
+      "host_malformed_response",
       "bw_not_logged_in",
       "vault_locked",
       "item_not_found",
@@ -48,6 +49,7 @@ describe("categoryForCode", () => {
     for (const code of [
       "host_not_running",
       "host_disconnected",
+      "host_malformed_response",
       "bw_not_logged_in",
       "vault_locked",
       "item_not_found",
